@@ -16,7 +16,7 @@ fn init_logger(log_level: LevelFilter, log_path: &Path) {
     WriteLogger::init(
         log_level,
         ConfigBuilder::new().set_time_format_rfc3339().build(),
-        fs::File::create(log_path).expect("Failed to generate log file"),
+        fs::OpenOptions::new().append(true).create(true).open(log_path).expect("Failed to generate log file"),
     )
     .expect("Failed to initialize logger")
 }
@@ -45,5 +45,7 @@ fn main() {
         Ok(stat) => request_handler::run(stat),
         Err(err) => panic!("Failed to Start! Could not create pooled SQL Connection: {}", err),
     };
-    log::info!("{:?}", result);
+    if result.is_err() {
+        log::error!("{}", result.err().unwrap());
+    }
 }

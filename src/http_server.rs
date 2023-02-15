@@ -17,8 +17,9 @@ pub mod request_handler {
             None => {return None;}
         };
 
-        let _sql_content = mysql_handler::verify_user(state.pool.clone(), &user.unwrap_or("."), &token.unwrap_or("."));
-        
+        if let Ok(sql_content) = mysql_handler::verify_user(state.pool.clone(), &user.unwrap_or("."), &token.unwrap_or(".")) {
+            return sql_content;
+        }
         None
     }
 

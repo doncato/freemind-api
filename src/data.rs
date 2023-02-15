@@ -4,30 +4,12 @@ pub mod data_types {
     use std::path::{Path, PathBuf};
     use mysql;
 
-
-    #[derive(Serialize, Deserialize)]
-    pub struct DataBaseConfig {
-        pub username: String,
-        pub password: String,
-        pub host: String,
-        pub database: String,
-    }
-
-    impl ::std::default::Default for DataBaseConfig {
-        fn default() -> Self {
-            Self {
-                username: "freemind".to_string(),
-                password: "".to_string(),
-                host: "localhost".to_string(),
-                database: "freemind".to_string(),
-            }
-        }
-    }
-
-
     #[derive(Serialize, Deserialize)]
     pub struct AppConfig {
-        pub database: DataBaseConfig,
+        pub database_username: String,
+        pub database_password: String,
+        pub database_host: String,
+        pub database_database: String,
         pub port: u16,
         pub log_path: PathBuf,
         pub log_level: u8,
@@ -37,7 +19,10 @@ pub mod data_types {
     impl ::std::default::Default for AppConfig {
         fn default() -> Self {
             Self {
-                database: DataBaseConfig::default(),
+                database_username: "freemind".to_string(),
+                database_password: "".to_string(),
+                database_host: "localhost".to_string(),
+                database_database: "freemind".to_string(),
                 port: 8008,
                 log_path: Path::new("/var/log/freemind.log").to_path_buf(),
                 log_level: 3,
@@ -56,10 +41,10 @@ pub mod data_types {
     impl AppState {
         pub fn from_config(config: &AppConfig) -> Result<Self, mysql::Error> {
             let opts = mysql::OptsBuilder::new()
-                .user(Some(&config.database.username))
-                .pass(Some(&config.database.password))
-                .ip_or_hostname(Some(&config.database.host))
-                .db_name(Some(&config.database.database));
+                .user(Some(&config.database_username))
+                .pass(Some(&config.database_password))
+                .ip_or_hostname(Some(&config.database_host))
+                .db_name(Some(&config.database_database));
             let pool = mysql::Pool::new(opts)?;
             Ok(Self {
                 port: config.port,
@@ -91,7 +76,6 @@ pub mod mysql_handler {
         let mut conn = pool.get_conn()?;
         let stmt = conn.as_mut().prep("SELECT username FROM logins WHERE username = ? AND token = ?")?;
         let res = conn.exec_first(stmt,(user, token))?;
-        println!("The Result: {:?}", res);
         Ok(res)
     }
 }
