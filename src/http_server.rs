@@ -5,9 +5,11 @@ pub mod request_handler {
         post, web, App, HttpRequest, HttpResponse, HttpServer,
         Result,
     };
+    use actix_web::http::header::{ContentDisposition, DispositionType};
+    use actix_files as actx_fs;
 
 
-    async fn verify_request(req: HttpRequest, state: web::Data<AppState>) -> Option<String> {
+    async fn verify_request(req: &HttpRequest, state: &web::Data<AppState>) -> Option<String> {
         let user = match req.headers().get("user") {
             Some(val) => val.to_str().ok(),
             None => {return None;}
@@ -25,7 +27,28 @@ pub mod request_handler {
 
     #[post(r"/v1/xml/fetch")]
     async fn post_xml_fetch(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
-        if let Some(_user) = verify_request(req, state).await {
+        if let Some(user) = verify_request(&req, &state).await {
+            let mut path: std::path::PathBuf = state.user_files_path.clone();
+            path.push(user);
+            let file = actx_fs::NamedFile::open(path)?;
+
+            let response = file
+                .use_last_modified(true)
+                .set_content_disposition(ContentDisposition {
+                    disposition: DispositionType::Attachment,
+                    parameters: vec![]
+                }
+            );
+            return Ok(response.into_response(&req));
+        } else {
+            return Ok(HttpResponse::Unauthorized().body("401 - Unauthorized")); 
+        }
+
+    }
+
+    #[post(r"/v1/xml/update")]
+    async fn post_xml_update(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(_user) = verify_request(&req, &state).await {
             return Ok(HttpResponse::Ok().body("200 - OK"));
         } else {
             return Ok(HttpResponse::Unauthorized().body("401 - Unauthorized")); 

@@ -11,6 +11,7 @@ pub mod data_types {
         pub database_host: String,
         pub database_database: String,
         pub port: u16,
+        pub user_files_path: PathBuf,
         pub log_path: PathBuf,
         pub log_level: u8,
         pub workers: u8,
@@ -24,6 +25,7 @@ pub mod data_types {
                 database_host: "localhost".to_string(),
                 database_database: "freemind".to_string(),
                 port: 8008,
+                user_files_path: Path::new("./users/").to_path_buf(),
                 log_path: Path::new("/var/log/freemind.log").to_path_buf(),
                 log_level: 3,
                 workers: 4,
@@ -35,7 +37,8 @@ pub mod data_types {
     pub struct AppState {
         pub port: u16,
         pub workers: u8,
-        pub pool: mysql::Pool
+        pub pool: mysql::Pool,
+        pub user_files_path: PathBuf,
     }
 
     impl AppState {
@@ -50,6 +53,7 @@ pub mod data_types {
                 port: config.port,
                 workers: config.workers,
                 pool: pool,
+                user_files_path: config.user_files_path.clone(),
             })
         }
     }
