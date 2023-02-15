@@ -1,4 +1,5 @@
 pub mod request_handler {
+    use log;
     use crate::data::data_types::AppState;
     use crate::data::mysql_handler;
     use actix_web::{
@@ -29,7 +30,8 @@ pub mod request_handler {
     async fn post_xml_fetch(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
         if let Some(user) = verify_request(&req, &state).await {
             let mut path: std::path::PathBuf = state.user_files_path.clone();
-            path.push(user);
+            path.push(format!("{}.xml", user));
+            log::debug!("{:?}", path);
             let file = actx_fs::NamedFile::open(path)?;
 
             let response = file
