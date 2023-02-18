@@ -15,6 +15,7 @@ pub mod data_types {
         pub log_path: PathBuf,
         pub log_level: u8,
         pub workers: u8,
+        pub max_submit_size: u32,
     }
 
     impl ::std::default::Default for AppConfig {
@@ -29,6 +30,7 @@ pub mod data_types {
                 log_path: Path::new("/var/log/freemind.log").to_path_buf(),
                 log_level: 3,
                 workers: 4,
+                max_submit_size: 5_242_880, // == 5 MiB
             }
         }
     }
@@ -39,6 +41,7 @@ pub mod data_types {
         pub workers: u8,
         pub pool: mysql::Pool,
         pub user_files_path: PathBuf,
+        pub max_payload_size: u32,
     }
 
     impl AppState {
@@ -54,6 +57,7 @@ pub mod data_types {
                 workers: config.workers,
                 pool: pool,
                 user_files_path: config.user_files_path.clone(),
+                max_payload_size: config.max_submit_size
             })
         }
     }
@@ -69,6 +73,32 @@ pub mod data_types {
             5 => LevelFilter::Trace,
             _ => LevelFilter::Info,
         }
+    }
+}
+
+pub mod xml_engine {
+    use quick_xml::reader::Reader as XmlReader;
+    use quick_xml::events::Event as XmlEvent;
+    use quick_xml;
+
+    pub async fn validate_xml_payload(path: &std::path::PathBuf) -> Result<bool, quick_xml::Error> {
+        let mut registry_count: u8 = 0;
+
+        let mut xml_reader = XmlReader::from_file(path)?; // I just hope this doesn't error
+        let mut buf = Vec::new();
+        loop {
+            match xml_reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) => {
+                    match e.name().as_ref() {
+                        b"registry" => registry_count += 1,
+                        _ => (),
+                    }
+                }
+                XmlEvent::Eof => break,
+                _ => (),
+            }
+        }
+        Ok(registry_count == 1)
     }
 }
 
