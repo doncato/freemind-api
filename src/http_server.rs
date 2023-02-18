@@ -102,8 +102,9 @@ pub mod request_handler {
                 if valid {
                     log::debug!("Submitted File valid! Copying temporary file in final place...");
                     fs::copy(&path, &final_path)?;
+                } else {
+                    response = HttpResponse::BadRequest().body("400 - Bad Request");
                 }
-                response = HttpResponse::BadRequest().body("400 - Bad Request");
             } else {
                 response = HttpResponse::InternalServerError().body("500 - Internal Server Error");
             };
@@ -131,8 +132,9 @@ pub mod request_handler {
             if let Ok(valid) = xml_engine::validate_xml_payload(&path).await {
                 if valid {
                     log::debug!("File passed validation returning success");
+                } else {
+                    response = HttpResponse::BadRequest().body("400 - Bad Request");
                 }
-                response = HttpResponse::BadRequest().body("400 - Bad Request");
             } else {
                 response = HttpResponse::InternalServerError().body("500 - Internal Server Error");
             };
