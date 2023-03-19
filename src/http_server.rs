@@ -17,7 +17,7 @@ pub mod request_handler {
     use tokio::io::AsyncWriteExt;
     use tokio::fs::File as TokioFile;
 
-    async fn verify_request(req: &HttpRequest, state: &web::Data<AppState>) -> Option<String> {
+    async fn verify_request<'a>(req: &'a HttpRequest, state: &web::Data<AppState>) -> Option<&'a str> {
         let user = match req.headers().get("user") {
             Some(val) => val.to_str().ok(),
             None => {return None;}

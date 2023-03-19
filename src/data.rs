@@ -103,13 +103,22 @@ pub mod xml_engine {
 }
 
 pub mod mysql_handler {
+    use bcrypt;
     use mysql;
     use mysql::prelude::Queryable;
 
-    pub fn verify_user(pool: mysql::Pool, user: &str, token: &str) -> Result<Option<String>, mysql::Error> {
+    pub fn verify_user<'a>(pool: mysql::Pool, user: &'a str, token: &str) -> Result<Option<&'a str>, mysql::Error> {
         let mut conn = pool.get_conn()?;
-        let stmt = conn.as_mut().prep("SELECT username FROM logins WHERE username = ? AND token = ?")?;
-        let res = conn.exec_first(stmt,(user, token))?;
-        Ok(res)
+        let stmt = conn.as_mut().prep("SELECT token FROM logins WHERE username = ?")?;
+        let res: Option<String> = conn.exec_first(stmt,(user,))?;
+        let mut valid = false;
+        if let Some(tok) = res {
+            valid = bcrypt::verify(token, tok.as_ref()).unwrap_or(false);
+        }
+        if valid {
+            Ok(Some(user))
+        } else {
+            Ok(None)
+        }
     }
 }
