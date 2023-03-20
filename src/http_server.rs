@@ -24,12 +24,25 @@ pub mod request_handler {
         };
         let token = match req.headers().get("token") {
             Some(val) => val.to_str().ok(),
-            None => {return None;}
+            None => None
+        };
+        let session = match req.headers().get("session") {
+            Some(val) => val.to_str().ok(),
+            None => None
         };
 
-        if let Ok(sql_content) = mysql_handler::verify_user(state.pool.clone(), &user.unwrap_or("."), &token.unwrap_or(".")) {
-            return sql_content;
+        if token.is_none() && session.is_none() {
+            return None
+        } else if token.is_none() && session.is_some() {
+            if let Ok(sql_content) = mysql_handler::verify_session(state.pool.clone(), &user.unwrap_or("."), &session.unwrap_or(".")) {
+                return sql_content;
+            }
+        } else {
+            if let Ok(sql_content) = mysql_handler::verify_user(state.pool.clone(), &user.unwrap_or("."), &token.unwrap_or(".")) {
+                return sql_content;
+            }
         }
+
         None
     }
 

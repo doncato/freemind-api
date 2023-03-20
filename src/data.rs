@@ -104,6 +104,7 @@ pub mod xml_engine {
 
 pub mod mysql_handler {
     use bcrypt;
+    use chrono::{DateTime, offset::Utc};
     use mysql;
     use mysql::prelude::Queryable;
 
@@ -116,6 +117,23 @@ pub mod mysql_handler {
             valid = bcrypt::verify(token, tok.as_ref()).unwrap_or(false);
         }
         if valid {
+            Ok(Some(user))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn verify_session<'a>(pool: mysql::Pool, user: &'a str, session_id: &str) -> Result<Option<&'a str>, mysql::Error> {
+        let mut conn: mysql::PooledConn = pool.get_conn()?;
+        let stmt = conn.as_mut().prep("SELECT expires FROM sessions WHERE username = ? AND session = ?")?;
+        let expires: Option<String> = conn.exec_first(stmt, (user, session_id))?;
+        let timestamp = match DateTime::parse_from_rfc3339(expires.unwrap_or("".to_string()).as_ref()) {
+            Ok(val) => val.timestamp(),
+            Err(_) => 0,
+        };
+        let now = Utc::now().timestamp();
+        
+        if timestamp > now {
             Ok(Some(user))
         } else {
             Ok(None)
