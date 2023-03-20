@@ -1,6 +1,9 @@
 # Freemind - API
 This is the Api server of the Freemind project.
 
+## TODOs
+- Add Logging everywhere
+
 ## Endpoints
 ### Existing
 `/v1/xml/fetch` To fetch the whole XML document.
