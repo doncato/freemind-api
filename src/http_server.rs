@@ -18,9 +18,15 @@ pub mod request_handler {
     use tokio::fs::File as TokioFile;
 
     async fn verify_request<'a>(req: &'a HttpRequest, state: &web::Data<AppState>) -> Option<&'a str> {
+        log::info!("New request from {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"));
+        log::debug!("Verifying request...");
         let user = match req.headers().get("user") {
             Some(val) => val.to_str().ok(),
-            None => {return None;}
+            None => {
+                log::debug!("Verification failed. No user provided.");
+                log::info!("Rejecting request from {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"));
+                return None;
+            }
         };
         let token = match req.headers().get("token") {
             Some(val) => val.to_str().ok(),
@@ -32,17 +38,24 @@ pub mod request_handler {
         };
 
         if token.is_none() && session.is_none() {
+            log::debug!("Verification failed. Neither token nor session provided.");
+            log::info!("Rejecting request from {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"));
             return None
         } else if token.is_none() && session.is_some() {
+            log::debug!("Processing verification using session...");
             if let Ok(sql_content) = mysql_handler::verify_session(state.pool.clone(), &user.unwrap_or("."), &session.unwrap_or(".")) {
+                log::info!("Request from {:#?} accepted and authenticated as user {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"), &sql_content.unwrap_or("unknown"));
                 return sql_content;
             }
         } else {
+            log::debug!("Processing verification using token...");
             if let Ok(sql_content) = mysql_handler::verify_user(state.pool.clone(), &user.unwrap_or("."), &token.unwrap_or(".")) {
+                log::info!("Request from {:#?} accepted and authenticated as user {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"), &sql_content.unwrap_or("unknown"));
                 return sql_content;
             }
         }
 
+        log::info!("Rejecting request from {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"));
         None
     }
 
@@ -62,8 +75,12 @@ pub mod request_handler {
             let mut path: std::path::PathBuf = state.user_files_path.clone();
             path.push(format!("{}.xml", user));
 
+            log::debug!("Got a fetch request.");
+
             match actx_fs::NamedFile::open(path) {
                 Ok(file) => {
+                    log::debug!("Successfully returned requested file");
+
                     let response = file
                         .use_last_modified(true)
                         .set_content_disposition(ContentDisposition {
@@ -74,6 +91,8 @@ pub mod request_handler {
                     Ok(response.into_response(&req))
                 },
                 Err(err) => {
+                    log::debug!("Failed to fetch requested file");
+
                     let status: u16 = match err.kind() {
                         ErrorKind::NotFound => 404,
                         ErrorKind::PermissionDenied => 403,
@@ -116,6 +135,7 @@ pub mod request_handler {
                     log::debug!("Submitted File valid! Copying temporary file in final place...");
                     fs::copy(&path, &final_path)?;
                 } else {
+                    log::debug!("Submitted File invalid!");
                     response = HttpResponse::BadRequest().body("400 - Bad Request");
                 }
             } else {
@@ -135,7 +155,7 @@ pub mod request_handler {
             let mut path: std::path::PathBuf = state.user_files_path.clone();
             path.push(format!("{}.tmp.xml", user));
 
-            log::debug!("Got a verify request, writing body into temporary file");
+            log::debug!("Got a verify request, writing body into temporary file.");
 
             write_body(&path, payload).await?;
 
@@ -144,8 +164,9 @@ pub mod request_handler {
             log::debug!("Validating temporary file");
             if let Ok(valid) = xml_engine::validate_xml_payload(&path).await {
                 if valid {
-                    log::debug!("File passed validation returning success");
+                    log::debug!("File passed validation returning success.");
                 } else {
+                    log::debug!("File failed validation.");
                     response = HttpResponse::BadRequest().body("400 - Bad Request");
                 }
             } else {

@@ -117,8 +117,10 @@ pub mod mysql_handler {
             valid = bcrypt::verify(token, tok.as_ref()).unwrap_or(false);
         }
         if valid {
+            log::debug!("User {:#?} was successfully verified.", &user);
             Ok(Some(user))
         } else {
+            log::debug!("User {:#?} tried to verify but verification failed.", &user);
             Ok(None)
         }
     }
@@ -134,8 +136,10 @@ pub mod mysql_handler {
         let now = Utc::now().timestamp();
         
         if timestamp > now {
+            log::debug!("User {:#?} was successfully verified.", &user);
             Ok(Some(user))
         } else {
+            log::debug!("User {:#?} tried to verify but verification failed.", &user);
             Ok(None)
         }
     }
