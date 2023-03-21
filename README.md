@@ -2,7 +2,7 @@
 This is the Api server of the Freemind project.
 
 ## TODOs
-- Add Logging everywhere
+- Clean up expired sessions
 
 ## Endpoints
 ### Existing
