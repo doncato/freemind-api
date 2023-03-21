@@ -3,11 +3,14 @@ This is the Api server of the Freemind project.
 
 ## TODOs
 - Clean up expired sessions
+- Add more endpoints
+- Improve the xml verification
 
 ## Endpoints
 ### Existing
 `/v1/xml/fetch` To fetch the whole XML document.
 `/v1/xml/update` To update the whole XML document.
+`/v1/xml/validate` To validate a XML document but not actually performing any changes.
 
 ### Planned
 `/v1/act/delete_old` To delete nodes which are past due
