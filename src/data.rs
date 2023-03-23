@@ -1,3 +1,4 @@
+/// Contains the custom datatypes used throughout the project
 pub mod data_types {
     use log::LevelFilter;
     use serde::{Deserialize, Serialize};
@@ -76,47 +77,54 @@ pub mod data_types {
     }
 }
 
+/// Does all of the nice xml parsing and handling
+/// - knows what xml is
 pub mod xml_engine {
     use quick_xml::reader::Reader as XmlReader;
     use quick_xml::events::Event as XmlEvent;
     use quick_xml;
 
+    /// Validates any xml document located under *path*
     pub async fn validate_xml_payload(path: &std::path::PathBuf) -> Result<bool, quick_xml::Error> {
-        let mut registry_count: u8 = 0;
+        let mut registry_count: u8 = 0; // Counter to check how often a registry node exists
 
-        let mut xml_reader = XmlReader::from_file(path)?; // I just hope this doesn't error
-        let mut buf = Vec::new();
-        loop {
+        let mut xml_reader = XmlReader::from_file(path)?; // I just hope this doesn't error // Reader for the xml file
+        let mut buf = Vec::new(); // A buffer to read into
+        loop { // Iterate over the xml reader
             match xml_reader.read_event_into(&mut buf)? {
-                XmlEvent::Start(e) => {
-                    match e.name().as_ref() {
-                        b"registry" => registry_count += 1,
-                        _ => (),
+                XmlEvent::Start(e) => { // As if I'd know what is going on here
+                    match e.name().as_ref() { // ???
+                        b"registry" => registry_count += 1, // If a registry node is found increase the counter
+                        _ => (), 
                     }
                 }
-                XmlEvent::Eof => break,
+                XmlEvent::Eof => break, // Stop the iteration when the file ends
                 _ => (),
             }
         }
-        Ok(registry_count == 1)
+        Ok(registry_count == 1) // There should be only one registry so yeah guess the rest
     }
 }
 
+/// Does all of the wild SQL shit
+/// - knows how to talk SQL
+/// - knows how to bcrypt
 pub mod mysql_handler {
     use bcrypt;
     use chrono::{DateTime, offset::Utc};
     use mysql;
     use mysql::prelude::Queryable;
 
+    /// Verify a user using a token against the database
     pub fn verify_user<'a>(pool: mysql::Pool, user: &'a str, token: &str) -> Result<Option<&'a str>, mysql::Error> {
-        let mut conn = pool.get_conn()?;
-        let stmt = conn.as_mut().prep("SELECT token FROM logins WHERE username = ?")?;
+        let mut conn = pool.get_conn()?; // Obtain a pooled connection to the database
+        let stmt = conn.as_mut().prep("SELECT token FROM logins WHERE username = ?")?; // Prepare a Select statement to get the hashed token associated with the user
         let res: Option<String> = conn.exec_first(stmt,(user,))?;
         let mut valid = false;
         if let Some(tok) = res {
-            valid = bcrypt::verify(token, tok.as_ref()).unwrap_or(false);
+            valid = bcrypt::verify(token, tok.as_ref()).unwrap_or(false); // Verify the found token from the database with the provided one using bcrypt
         }
-        if valid {
+        if valid { // Return the result
             log::debug!("User {:#?} was successfully verified.", &user);
             Ok(Some(user))
         } else {
@@ -125,16 +133,18 @@ pub mod mysql_handler {
         }
     }
 
+    /// Verify an ongoing session against the database
     pub fn verify_session<'a>(pool: mysql::Pool, user: &'a str, session_id: &str) -> Result<Option<&'a str>, mysql::Error> {
-        let mut conn: mysql::PooledConn = pool.get_conn()?;
-        let stmt = conn.as_mut().prep("SELECT expires FROM sessions WHERE username = ? AND session = ?")?;
-        let expires: Option<String> = conn.exec_first(stmt, (user, session_id))?;
-        let timestamp = match DateTime::parse_from_rfc3339(expires.unwrap_or("".to_string()).as_ref()) {
+        let mut conn: mysql::PooledConn = pool.get_conn()?; // Obtain a pooled connection to the database
+        let stmt = conn.as_mut().prep("SELECT expires FROM sessions WHERE username = ? AND session = ?")?; // Prepare a Select statement to get the expiration date from the session of the provided username and session
+        let expires: Option<String> = conn.exec_first(stmt, (user, session_id))?; 
+        let timestamp = match DateTime::parse_from_rfc3339(expires.unwrap_or("".to_string()).as_ref()) { // Parse the expired string into a timestamp
             Ok(val) => val.timestamp(),
             Err(_) => 0,
         };
         let now = Utc::now().timestamp();
         
+        // Compare the timestamp from the database with the actual time and return the result
         if timestamp > now {
             log::debug!("User {:#?} was successfully verified.", &user);
             Ok(Some(user))
