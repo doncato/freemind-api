@@ -6,11 +6,37 @@ This is the Api server of the Freemind project.
 - Add more endpoints
 - Improve the xml verification
 
+## SETUP
+### 1. Installation
+Put the released binary or your custom compiled binary
+in a (created folder) where you want it. Launch the
+programm once to generate the config file in the local
+directory. Customize the configuration according to your
+needs (e.g. fill in the SQL DB login data)
+
+### 2. Set up your SQL database
+Assuming you already have a MySql Database (or similiar)
+installed, create a new Database (the name is not important
+but use the name in your config file). Afterwards generate
+the important tables with the following two SQL commands:
+
+`CREATE TABLE logins (username varchar(255) NOT NULL UNIQUE, password varchar(255) NOT NULL, token varchar(255));`
+
+(This one is really important when you want to have an integrated frontend
+you may not need this command but the server might fail if you don't have this
+table in place. Additionally it may be used more in upcomming releases)
+`CREATE TABLE sessions (username varchar(255) NOT NULL, session varchar(255) NOT NULL UNIQUE, expires varchar(255));`
+
+### 3. Run
+Start the binary. You can now insert new users into your database.
+Please note: passwords and tokens are expected to be saved as a
+bcrypt hash in the database
+
 ## Endpoints
 ### Existing
 `/v1/xml/fetch` To fetch the whole XML document.
 `/v1/xml/update` To update the whole XML document.
-`/v1/xml/validate` To validate a XML document but not actually performing any changes.
+`/v1/xml/validate` To validate a XML document but not actually perform any changes.
 
 ### Planned
 `/v1/act/delete_old` To delete nodes which are past due
