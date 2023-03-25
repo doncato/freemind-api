@@ -252,6 +252,10 @@ pub mod mysql_handler {
 
             delete_all_test_sessions(&pool, user)?;
 
+            let res = mysql_handler::verify_session(&pool, user, session_id)?;
+
+            assert_eq!(None, res); // Session should now be invalid
+
             Ok(())
         }
 
