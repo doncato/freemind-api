@@ -117,7 +117,7 @@ pub mod mysql_handler {
 
     /// Verify a user using a token against the database
     pub fn verify_user<'a>(pool: mysql::Pool, user: &'a str, token: &str) -> Result<Option<&'a str>, mysql::Error> {
-        let mut conn = pool.get_conn()?; // Obtain a pooled connection to the database
+        let mut conn: mysql::PooledConn = pool.get_conn()?; // Obtain a pooled connection to the database
         let stmt = conn.as_mut().prep("SELECT token FROM logins WHERE username = ?")?; // Prepare a Select statement to get the hashed token associated with the user
         let res: Option<String> = conn.exec_first(stmt,(user,))?;
         let mut valid = false;
@@ -138,12 +138,19 @@ pub mod mysql_handler {
         let mut conn: mysql::PooledConn = pool.get_conn()?; // Obtain a pooled connection to the database
         let stmt = conn.as_mut().prep("SELECT expires FROM sessions WHERE username = ? AND session = ?")?; // Prepare a Select statement to get the expiration date from the session of the provided username and session
         let expires: Option<String> = conn.exec_first(stmt, (user, session_id))?; 
-        let timestamp = match DateTime::parse_from_rfc3339(expires.unwrap_or("".to_string()).as_ref()) { // Parse the expired string into a timestamp
+        let timestamp: i64 = match DateTime::parse_from_rfc3339(expires.unwrap_or("".to_string()).as_ref()) { // Parse the expired string into a timestamp
             Ok(val) => val.timestamp(),
             Err(_) => 0,
         };
-        let now = Utc::now().timestamp();
-        
+        let now: i64 = Utc::now().timestamp();
+
+        // Delete expired sessions every now and then
+        if (now % 5) == 0 {
+            log::debug!("Starting to delete expired sessions");
+            delete_expired_sessions(pool)?; // This is not really expected to fail as it should just execute SQL statements which was already done before
+            log::debug!("Finished to delete expired sessions");
+        }
+
         // Compare the timestamp from the database with the actual time and return the result
         if timestamp > now {
             log::debug!("User {:#?} was successfully verified.", &user);
@@ -153,4 +160,38 @@ pub mod mysql_handler {
             Ok(None)
         }
     }
+
+    /// Deletes all sessions from the database which have expired
+    fn delete_expired_sessions(pool: mysql::Pool) -> Result<(), mysql::Error> {
+        log::debug!("Fetching all sessions from the databse");
+        let mut conn: mysql::PooledConn = pool.get_conn()?;
+        let all_sessions: Vec<Vec<String>> = conn.query_map(
+            "SELECT session, expires FROM sessions",
+            |(session, expires)| {
+                vec![session, expires]
+            }
+        )?;
+        
+        let now: i64 = Utc::now().timestamp();
+
+        for row in all_sessions.iter() {
+            let session = &row[0];
+            let expires = &row[1];
+
+            let timestamp: i64 = match DateTime::parse_from_rfc3339(expires) {
+                Ok(val) => val.timestamp(),
+                Err(_) => 0,
+            };
+
+            if now > timestamp {
+                log::debug!("Deleting session");
+                let stmt = conn.as_mut().prep("DELETE FROM sessions WHERE session = ?")?;
+                let _: Vec<String> = conn.exec(stmt, (session,))?;
+            }
+
+        }
+        Ok(())
+    }
+
+
 }
