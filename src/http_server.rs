@@ -54,13 +54,13 @@ pub mod request_handler {
             return None
         } else if token.is_none() && session.is_some() { // Verify the data with the database using the session information when only the session was provided
             log::debug!("Processing verification using session...");
-            if let Ok(sql_content) = mysql_handler::verify_session(state.pool.clone(), &user.unwrap_or("."), &session.unwrap_or(".")) {
+            if let Ok(sql_content) = mysql_handler::verify_session(&state.pool, &user.unwrap_or("."), &session.unwrap_or(".")) {
                 log::info!("Request from {:#?} accepted and authenticated as user {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"), &sql_content.unwrap_or("unknown"));
                 return sql_content;
             }
         } else { // Verify the data with the database using the token information when a token was provided
             log::debug!("Processing verification using token...");
-            if let Ok(sql_content) = mysql_handler::verify_user(state.pool.clone(), &user.unwrap_or("."), &token.unwrap_or(".")) {
+            if let Ok(sql_content) = mysql_handler::verify_user(&state.pool, &user.unwrap_or("."), &token.unwrap_or(".")) {
                 log::info!("Request from {:#?} accepted and authenticated as user {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"), &sql_content.unwrap_or("unknown"));
                 return sql_content;
             }
