@@ -2,9 +2,10 @@
 This is the Api server of the Freemind project.
 
 ## TODOs
-- Clean up expired sessions
+- Clean up expired sessions (Implemented but not Tested)
 - Add more endpoints
 - Improve the xml verification
+  - Check that the id's occur only once
 
 ## SETUP
 ### 1. Installation
