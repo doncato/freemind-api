@@ -8,8 +8,8 @@ This is the Api server of the Freemind project.
 
 ## LIMITATIONS
 ### Elements
-Each Element (each entry and directory node) must have a unique ID which is
-(as of now) saved and handles as an unsigned 16 bit integer. Meaning you can
+Each Element (each entry and directory node) must have an unique ID which is
+(as of now) saved and handled as an unsigned 16 bit integer. Meaning you can
 have 'only' about 65535 entries. Although the more you approach this number
 the longer generation of new entries might take. As of now I don't think that
 anyone needs more than 1000 entries registred at once.
