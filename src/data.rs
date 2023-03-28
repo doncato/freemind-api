@@ -81,23 +81,79 @@ pub mod data_types {
 /// - knows what xml is
 pub mod xml_engine {
     use quick_xml::reader::Reader as XmlReader;
-    use quick_xml::events::Event as XmlEvent;
+    use quick_xml::events::{Event as XmlEvent, BytesStart};
+    use std::io::BufReader;
+    use std::fs::File;
     use quick_xml;
+
+
+    fn get_id_attribute<'a>(reader: &XmlReader<BufReader<File>>, element: BytesStart<'a>) -> Result<Option<u16>, quick_xml::Error> {
+        for attribute in element.attributes() {
+            if let Ok(val) = attribute {
+                if val.key.local_name().as_ref() == b"id" {
+                    let v = val.decode_and_unescape_value(&reader)?.to_string();
+                    return match v.parse::<u16>() {
+                        Ok(val) => Ok(Some(val)),
+                        Err(_) => Ok(None),
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Read through event and  nodes in the registry. Calls this function
+    /// recursively if it finds a 
+    fn read_registry_nodes(reader: &mut XmlReader<BufReader<File>>) -> Result<Option<Vec<u16>>, quick_xml::Error> {
+        //let xml_reader = XmlReader::from_reader(reader);
+        let mut buf: Vec<u8> = Vec::new();
+        let mut ids: Vec<u16> = Vec::new();
+
+        loop { // Iterate over the xml reader
+            match reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == b"entry" => {
+                    if let Some(id) = get_id_attribute(&reader, e)? {
+                        ids.push(id);
+                    } else {
+                        return Ok(None) // Meaning there was an entry without an id
+                    }
+                }
+                XmlEvent::Start(e) if e.name().as_ref() == b"directory" => {
+                    let res = read_registry_nodes(reader);
+                }
+                XmlEvent::Start(e) => {}
+                XmlEvent::End(e) if e.name().as_ref() == b"directory" => break,
+                XmlEvent::End(e) if e.name().as_ref() == b"registry" => break,
+                XmlEvent::Eof => break, // Maybe it should return false in this case as when it reaches this point there wasn't an end tag for the registry
+                _ => (),
+            }
+
+        }
+        Ok(Some(ids))
+    }
 
     /// Validates any xml document located under *path*
     pub async fn validate_xml_payload(path: &std::path::PathBuf) -> Result<bool, quick_xml::Error> {
-        let mut registry_count: u8 = 0; // Counter to check how often a registry node exists
+        let mut registry_count: u8 = 0;
 
-        let mut xml_reader = XmlReader::from_file(path)?; // I just hope this doesn't error // Reader for the xml file
-        let mut buf = Vec::new(); // A buffer to read into
+        let mut xml_reader = XmlReader::from_file(path)?; // I just hope this doesn't error
+        let mut buf: Vec<u8> = Vec::new();
+        let mut ids: Vec<u16> = Vec::new();
         loop { // Iterate over the xml reader
             match xml_reader.read_event_into(&mut buf)? {
-                XmlEvent::Start(e) => { // As if I'd know what is going on here
-                    match e.name().as_ref() { // ???
-                        b"registry" => registry_count += 1, // If a registry node is found increase the counter
-                        _ => (), 
+                XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
+                    // Traverse through the registry
+                    registry_count += 1;
+                    if let Some(res) = read_registry_nodes(&mut xml_reader)? {
+                        ids.extend(res);
+                    } else {
+                        return Ok(false)
                     }
                 }
+                XmlEvent::Start(e) if e.name().as_ref() == b"meta" => {
+                    // Traverse through the meta
+                }
+                XmlEvent::Start(e) => {}
                 XmlEvent::Eof => break, // Stop the iteration when the file ends
                 _ => (),
             }
