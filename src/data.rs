@@ -80,11 +80,11 @@ pub mod data_types {
 /// Does all of the nice xml parsing and handling
 /// - knows what xml is
 pub mod xml_engine {
-    use quick_xml::reader::Reader as XmlReader;
     use quick_xml::events::{Event as XmlEvent, BytesStart};
-    use std::io::BufReader;
-    use std::fs::File;
+    use quick_xml::reader::Reader as XmlReader;
     use quick_xml;
+    use std::fs::File;
+    use std::io::BufReader;
 
 
     fn get_id_attribute<'a>(reader: &XmlReader<BufReader<File>>, element: BytesStart<'a>) -> Result<Option<u16>, quick_xml::Error> {
@@ -119,7 +119,16 @@ pub mod xml_engine {
                     }
                 }
                 XmlEvent::Start(e) if e.name().as_ref() == b"directory" => {
-                    let res = read_registry_nodes(reader);
+                    if let Some(id) = get_id_attribute(&reader, e)? {
+                        ids.push(id);
+                        if let Some(contained_ids) = read_registry_nodes(reader)? {
+                            ids.extend(contained_ids);
+                        } else {
+                            return Ok(None)
+                        }
+                    } else {
+                        return Ok(None)
+                    }
                 }
                 XmlEvent::Start(e) => {}
                 XmlEvent::End(e) if e.name().as_ref() == b"directory" => break,
@@ -136,7 +145,7 @@ pub mod xml_engine {
     pub async fn validate_xml_payload(path: &std::path::PathBuf) -> Result<bool, quick_xml::Error> {
         let mut registry_count: u8 = 0;
 
-        let mut xml_reader = XmlReader::from_file(path)?; // I just hope this doesn't error
+        let mut xml_reader = XmlReader::from_file(path)?;
         let mut buf: Vec<u8> = Vec::new();
         let mut ids: Vec<u16> = Vec::new();
         loop { // Iterate over the xml reader
@@ -149,6 +158,13 @@ pub mod xml_engine {
                     } else {
                         return Ok(false)
                     }
+                    let length_then = ids.len();
+                    ids.sort_unstable(); // unstable is faster and lighter on memory says the documentation
+                    ids.dedup();
+                    let lenght_now = ids.len();
+                    if lenght_now != length_then { // Meaning there were duplicates removed
+                        return Ok(false) // Duplicates are not allowed
+                    }
                 }
                 XmlEvent::Start(e) if e.name().as_ref() == b"meta" => {
                     // Traverse through the meta
@@ -160,6 +176,40 @@ pub mod xml_engine {
         }
         Ok(registry_count == 1) // There should be only one registry so yeah guess the rest
     }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::data::xml_engine;
+        use quick_xml;
+        use std::path::PathBuf;
+        use tokio;
+
+        /// Verifies that all xml documents are accepted or rejected as they should
+        #[tokio::test]
+        async fn test_xml_validation() -> Result<(), quick_xml::Error> {
+            assert_eq!(
+                xml_engine::validate_xml_payload(&PathBuf::from("./tests/documents/valid_1.xml")).await?,
+                true
+            );
+            assert_eq!(
+                xml_engine::validate_xml_payload(&PathBuf::from("./tests/documents/valid_2.xml")).await?,
+                true
+            );
+            assert_eq!(
+                xml_engine::validate_xml_payload(&PathBuf::from("./tests/documents/invalid_1.xml")).await?,
+                false
+            );
+            assert_eq!(
+                xml_engine::validate_xml_payload(&PathBuf::from("./tests/documents/invalid_2.xml")).await?,
+                false
+            );
+            assert_eq!(
+                xml_engine::validate_xml_payload(&PathBuf::from("./tests/documents/invalid_3.xml")).await?,
+                false
+            );
+            Ok(())
+        }
+    }
 }
 
 /// Does all of the wild SQL shit
@@ -168,8 +218,8 @@ pub mod xml_engine {
 pub mod mysql_handler {
     use bcrypt;
     use chrono::{DateTime, offset::Utc};
-    use mysql;
     use mysql::prelude::Queryable;
+    use mysql;
 
     /// Verify a user using a token against the database
     pub fn verify_user<'a>(pool: &mysql::Pool, user: &'a str, token: &str) -> Result<Option<&'a str>, mysql::Error> {
@@ -251,11 +301,11 @@ pub mod mysql_handler {
 
     #[cfg(test)]
     mod tests {
+        use chrono::{naive::Days, offset::Utc};
         use crate::data::data_types::AppConfig;
         use crate::mysql_handler;
-        use chrono::{naive::Days, offset::Utc};
-        use mysql;
         use mysql::prelude::Queryable;
+        use mysql;
 
         // Function to get an SQL connection directly from config file
         fn get_sql_pool() -> Result<mysql::Pool, mysql::Error> {

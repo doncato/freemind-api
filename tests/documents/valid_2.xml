@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<registry version="1.0">
+    <entry id="12845">
+        <type>ToDo</type>
+        <name>Element 1</name>
+        <description>Lorem ipsum dolor sit amet</description>
+        <due>1676134800</due>
+    </entry>
+    <entry id="43362">
+        <type>ToDo</type>
+        <name>Element 2</name>
+        <description>Lorem ipsum dolor sit amet</description>
+        <due>1676134800</due>
+    </entry>
+    <directory id="22222">
+        <entry id="46233">
+            <type>ToDo</type>
+            <name>Element 3</name>
+            <description>Lorem ipsum dolor sit amet</description>
+            <due>1676134800</due>
+        </entry>
+        <directory id="22223">
+        </directory>
+    </directory>
+</registry>
