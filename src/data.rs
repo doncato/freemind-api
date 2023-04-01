@@ -130,7 +130,7 @@ pub mod xml_engine {
                         return Ok(None)
                     }
                 }
-                XmlEvent::Start(e) => {}
+                XmlEvent::Start(_e) => {}
                 XmlEvent::End(e) if e.name().as_ref() == b"directory" => break,
                 XmlEvent::End(e) if e.name().as_ref() == b"registry" => break,
                 XmlEvent::Eof => break, // Maybe it should return false in this case as when it reaches this point there wasn't an end tag for the registry
@@ -169,7 +169,7 @@ pub mod xml_engine {
                 XmlEvent::Start(e) if e.name().as_ref() == b"meta" => {
                     // Traverse through the meta
                 }
-                XmlEvent::Start(e) => {}
+                XmlEvent::Start(_e) => {}
                 XmlEvent::Eof => break, // Stop the iteration when the file ends
                 _ => (),
             }
