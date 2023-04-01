@@ -85,8 +85,9 @@ pub mod xml_engine {
     use quick_xml;
     use std::fs::File;
     use std::io::BufReader;
+    use core::ops::Range;
 
-
+    /// Gets the value of the id attribute of any node
     fn get_id_attribute<'a>(reader: &XmlReader<BufReader<File>>, element: BytesStart<'a>) -> Result<Option<u16>, quick_xml::Error> {
         for attribute in element.attributes() {
             if let Ok(val) = attribute {
@@ -141,29 +142,31 @@ pub mod xml_engine {
         Ok(Some(ids))
     }
 
-    /// Reads through the content of a registry to find a node with matching id.
+    ///  Reads through the content of a registry to find a node with matching id.
     /// Calls the function recursively to go through directories
-    fn find_node_by_id(reader: &mut XmlReader<BufReader<File>>, queried_id: u16) -> Result<Option<String>, quick_xml::Error> {
+    fn find_node_by_id(reader: &mut XmlReader<BufReader<File>>, queried_id: u16) -> Result<Option<Range<usize>>, quick_xml::Error> {
         let mut buf: Vec<u8> = Vec::new();
-
         loop {
             match reader.read_event_into(&mut buf)? {
                 XmlEvent::Start(e) if e.name().as_ref() == b"entry" => {
-                    if let Some(id) = get_id_attribute(&reader, e)? {
+                    if let Some(id) = get_id_attribute(&reader, e.clone())? {
                         if id == queried_id {
-                            return Ok(Some(e));
+                            let mut small_buf: Vec<u8> = Vec::new();
+                            let ctx = reader.read_to_end_into(e.to_end().name(), &mut small_buf)?;
+                            return Ok(Some(ctx));
                         }
                     }
                 },
                 XmlEvent::Start(e) if e.name().as_ref() == b"directory" => {
-                    if let Some(id) = get_id_attribute(&reader, e)? {
+                    if let Some(id) = get_id_attribute(&reader, e.clone())? {
                         if id == queried_id {
-                            let content = reader.read_text(e.name())?;
-                            return Ok(Some(e));
+                            let mut small_buf: Vec<u8> = Vec::new();
+                            let ctx = reader.read_to_end_into(e.to_end().name(), &mut small_buf)?;
+                            return Ok(Some(ctx));
                         }
                     }
-                    if let Some(id) = find_node_by_id(reader, queried_id)? {
-                        return Ok(Some(id));
+                    if let Some(result) = find_node_by_id(reader, queried_id)? {
+                        return Ok(Some(result));
                     }
                 },
                 XmlEvent::Start(_e) => {},
@@ -178,14 +181,18 @@ pub mod xml_engine {
         Ok(None)
     }
 
-    // Returns any node identified by it's id attribute
-    pub fn get_node_by_id(path: &std::path::PathBuf, queried_id: u16) -> Result<Option<String>, quick_xml::Error> {
+    /// Returns any node identified by it's id attribute
+    pub async fn get_node_by_id(path: &std::path::PathBuf, queried_id: u16) -> Result<Option<Vec<u8>>, quick_xml::Error> {
         let mut xml_reader = XmlReader::from_file(path)?;
         let mut buf: Vec<u8> = Vec::new();
         loop {
             match xml_reader.read_event_into(&mut buf)? {
                 XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
-                    return find_node_by_id(&mut xml_reader, queried_id);
+                    if let Some(ctx) = find_node_by_id(&mut xml_reader, queried_id)? {
+                        return Ok(Some(buf[ctx.start..ctx.end].to_vec()))
+                    } else {
+                        return Ok(None);
+                    }
                 },
                 XmlEvent::Start(_e) => {},
                 XmlEvent::Eof => break,
@@ -259,6 +266,7 @@ pub mod xml_engine {
         use quick_xml;
         use std::path::PathBuf;
         use tokio;
+        use core::ops::Range;
 
         /// Verifies that all xml documents are accepted or rejected as they should
         #[tokio::test]
@@ -296,6 +304,16 @@ pub mod xml_engine {
             assert_eq!(
                 xml_engine::collect_all_ids(&PathBuf::from("./tests/documents/valid_2.xml"))?,
                 vec![12845, 22222, 22223, 43362, 46233]
+            );
+            Ok(())
+        }
+
+        /// Verifies that nodes are found by id correctly
+        #[tokio::test]
+        async fn test_id_fetching() -> Result<(), quick_xml::Error> {
+            assert_eq!(
+                xml_engine::get_node_by_id(&PathBuf::from("./tests/documents/valid_1.xml"), 5).await?,
+                Some(vec![])
             );
             Ok(())
         }
