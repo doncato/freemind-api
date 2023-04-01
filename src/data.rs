@@ -103,7 +103,7 @@ pub mod xml_engine {
     }
 
     /// Read through event and  nodes in the registry. Calls this function
-    /// recursively if it finds a 
+    /// recursively if it finds a directory entry
     fn read_registry_nodes(reader: &mut XmlReader<BufReader<File>>) -> Result<Option<Vec<u16>>, quick_xml::Error> {
         //let xml_reader = XmlReader::from_reader(reader);
         let mut buf: Vec<u8> = Vec::new();
@@ -115,7 +115,7 @@ pub mod xml_engine {
                     if let Some(id) = get_id_attribute(&reader, e)? {
                         ids.push(id);
                     } else {
-                        return Ok(None) // Meaning there was an entry without an id
+                        return Ok(None) // Meaning there was an entry without an id which is illegal
                     }
                 }
                 XmlEvent::Start(e) if e.name().as_ref() == b"directory" => {
@@ -141,6 +141,82 @@ pub mod xml_engine {
         Ok(Some(ids))
     }
 
+    /// Reads through the content of a registry to find a node with matching id.
+    /// Calls the function recursively to go through directories
+    fn find_node_by_id(reader: &mut XmlReader<BufReader<File>>, queried_id: u16) -> Result<Option<String>, quick_xml::Error> {
+        let mut buf: Vec<u8> = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == b"entry" => {
+                    if let Some(id) = get_id_attribute(&reader, e)? {
+                        if id == queried_id {
+                            return Ok(Some(e));
+                        }
+                    }
+                },
+                XmlEvent::Start(e) if e.name().as_ref() == b"directory" => {
+                    if let Some(id) = get_id_attribute(&reader, e)? {
+                        if id == queried_id {
+                            let content = reader.read_text(e.name())?;
+                            return Ok(Some(e));
+                        }
+                    }
+                    if let Some(id) = find_node_by_id(reader, queried_id)? {
+                        return Ok(Some(id));
+                    }
+                },
+                XmlEvent::Start(_e) => {},
+                XmlEvent::End(e) if e.name().as_ref() == b"directory" => break,
+                XmlEvent::End(e) if e.name().as_ref() == b"registry" => break,
+                XmlEvent::Eof => break,
+                _ => (),
+            }
+
+        }
+
+        Ok(None)
+    }
+
+    // Returns any node identified by it's id attribute
+    pub fn get_node_by_id(path: &std::path::PathBuf, queried_id: u16) -> Result<Option<String>, quick_xml::Error> {
+        let mut xml_reader = XmlReader::from_file(path)?;
+        let mut buf: Vec<u8> = Vec::new();
+        loop {
+            match xml_reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
+                    return find_node_by_id(&mut xml_reader, queried_id);
+                },
+                XmlEvent::Start(_e) => {},
+                XmlEvent::Eof => break,
+                _ => (),
+            }
+        }
+        Ok(None)
+    }
+
+    /// Returns all IDs present in the registry (will return them sorted)
+    /// Performs no validation at all!
+    pub fn collect_all_ids(path: &std::path::PathBuf) -> Result<Vec<u16>, quick_xml::Error> {
+        let mut xml_reader = XmlReader::from_file(path)?;
+        let mut buf: Vec<u8> = Vec::new();
+        let mut ids: Vec<u16> = Vec::new();
+        loop {
+            match xml_reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
+                    if let Some(res) = read_registry_nodes(&mut xml_reader)? {
+                        ids.extend(res);
+                    }
+                    ids.sort_unstable(); // unstable is faster and lighter on memory says the documentation
+                },
+                XmlEvent::Start(_e) => {},
+                XmlEvent::Eof => break, // Stop the iteration when the file ends
+                _ => (),
+            }
+        }
+        Ok(ids)
+    }
+
     /// Validates any xml document located under *path*
     pub async fn validate_xml_payload(path: &std::path::PathBuf) -> Result<bool, quick_xml::Error> {
         let mut registry_count: u8 = 0;
@@ -148,7 +224,7 @@ pub mod xml_engine {
         let mut xml_reader = XmlReader::from_file(path)?;
         let mut buf: Vec<u8> = Vec::new();
         let mut ids: Vec<u16> = Vec::new();
-        loop { // Iterate over the xml reader
+        loop {
             match xml_reader.read_event_into(&mut buf)? {
                 XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
                     // Traverse through the registry
@@ -165,11 +241,11 @@ pub mod xml_engine {
                     if lenght_now != length_then { // Meaning there were duplicates removed
                         return Ok(false) // Duplicates are not allowed
                     }
-                }
+                },
                 XmlEvent::Start(e) if e.name().as_ref() == b"meta" => {
                     // Traverse through the meta
-                }
-                XmlEvent::Start(_e) => {}
+                },
+                XmlEvent::Start(_e) => {},
                 XmlEvent::Eof => break, // Stop the iteration when the file ends
                 _ => (),
             }
@@ -206,6 +282,20 @@ pub mod xml_engine {
             assert_eq!(
                 xml_engine::validate_xml_payload(&PathBuf::from("./tests/documents/invalid_3.xml")).await?,
                 false
+            );
+            Ok(())
+        }
+
+        /// Verifies that ids are collected correctly
+        #[test]
+        fn test_id_collection() -> Result<(), quick_xml::Error> {
+            assert_eq!(
+                xml_engine::collect_all_ids(&PathBuf::from("./tests/documents/valid_1.xml"))?,
+                vec![5, 12845, 22222, 22223, 43362, 43363, 46233]
+            );
+            assert_eq!(
+                xml_engine::collect_all_ids(&PathBuf::from("./tests/documents/valid_2.xml"))?,
+                vec![12845, 22222, 22223, 43362, 46233]
             );
             Ok(())
         }
