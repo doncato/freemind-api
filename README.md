@@ -3,8 +3,6 @@ This is the Api server of the Freemind project.
 
 ## TODOs
 - Add more endpoints
-- Improve the xml verification
-  - Check that the id's occur only once
 
 ## LIMITATIONS
 ### Elements
