@@ -80,12 +80,12 @@ pub mod data_types {
 /// Does all of the nice xml parsing and handling
 /// - knows what xml is
 pub mod xml_engine {
+    use core::ops::Range;
     use quick_xml::events::{Event as XmlEvent, BytesStart};
     use quick_xml::reader::Reader as XmlReader;
     use quick_xml;
     use std::fs::File;
-    use std::io::BufReader;
-    use core::ops::Range;
+    use std::io::{BufReader, SeekFrom, Seek, Read, Take};
 
     /// Gets the value of the id attribute of any node
     fn get_id_attribute<'a>(reader: &XmlReader<BufReader<File>>, element: BytesStart<'a>) -> Result<Option<u16>, quick_xml::Error> {
@@ -181,15 +181,26 @@ pub mod xml_engine {
         Ok(None)
     }
 
+
+    /// Gets a specified part of a document located under `path` and returns the
+    /// underlying content from start byte to end byte, where start and end are
+    /// defined with the range param
+    fn get_partial_document(path: &std::path::PathBuf, range: Range<usize>) -> Result<Take<File>, std::io::Error> {
+        let mut f = File::open(path)?;
+        f.seek(SeekFrom::Start(range.start.try_into().unwrap()))?;
+        let buf = f.take((range.end - range.start).try_into().unwrap());
+        Ok(buf)
+    }
+
     /// Returns any node identified by it's id attribute
-    pub async fn get_node_by_id(path: &std::path::PathBuf, queried_id: u16) -> Result<Option<Vec<u8>>, quick_xml::Error> {
+    pub async fn get_node_by_id(path: &std::path::PathBuf, queried_id: u16) -> Result<Option<Take<File>>, quick_xml::Error> {
         let mut xml_reader = XmlReader::from_file(path)?;
         let mut buf: Vec<u8> = Vec::new();
         loop {
             match xml_reader.read_event_into(&mut buf)? {
                 XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
                     if let Some(ctx) = find_node_by_id(&mut xml_reader, queried_id)? {
-                        return Ok(Some(buf[ctx.start..ctx.end].to_vec()))
+                        return Ok(Some(get_partial_document(path, ctx)?))
                     } else {
                         return Ok(None);
                     }
@@ -264,9 +275,8 @@ pub mod xml_engine {
     mod tests {
         use crate::data::xml_engine;
         use quick_xml;
-        use std::path::PathBuf;
+        use std::{path::PathBuf, io::Read};
         use tokio;
-        use core::ops::Range;
 
         /// Verifies that all xml documents are accepted or rejected as they should
         #[tokio::test]
@@ -311,9 +321,46 @@ pub mod xml_engine {
         /// Verifies that nodes are found by id correctly
         #[tokio::test]
         async fn test_id_fetching() -> Result<(), quick_xml::Error> {
+            let r: Option<String>;
+            let mut res: String = String::new();
+            if let Some(mut take) = xml_engine::get_node_by_id(&PathBuf::from("./tests/documents/valid_1.xml"), 0).await? {
+                take.read_to_string(&mut res)?;
+                r = Some(res.trim().to_string());
+            } else {
+                r = None;
+            }
             assert_eq!(
-                xml_engine::get_node_by_id(&PathBuf::from("./tests/documents/valid_1.xml"), 5).await?,
-                Some(vec![])
+                r,
+                None
+            );
+            
+            let r: Option<String>;
+            let mut res: String = String::new();
+            if let Some(mut take) = xml_engine::get_node_by_id(&PathBuf::from("./tests/documents/valid_1.xml"), 5).await? {
+                take.read_to_string(&mut res)?;
+                r = Some(res.trim().to_string());
+            } else {
+                r = None;
+            }
+            assert_eq!(
+                r,
+                Some("<type>ToDo</type>
+                <name>Element 4</name>
+                <description>Lorem ipsum dolor sit amet</description>
+                <due>1676134800</due>".to_string())
+            );
+
+            let r: Option<String>;
+            let mut res: String = String::new();
+            if let Some(mut take) = xml_engine::get_node_by_id(&PathBuf::from("./tests/documents/valid_2.xml"), 22223).await? {
+                take.read_to_string(&mut res)?;
+                r = Some(res.trim().to_string());
+            } else {
+                r = None;
+            }
+            assert_eq!(
+                r,
+                Some("".to_string())
             );
             Ok(())
         }
