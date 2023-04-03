@@ -398,10 +398,11 @@ pub mod mysql_handler {
     pub fn verify_session<'a>(pool: &mysql::Pool, user: &'a str, session_id: &str) -> Result<Option<&'a str>, mysql::Error> {
         let mut conn: mysql::PooledConn = pool.get_conn()?; // Obtain a pooled connection to the database
         let stmt = conn.as_mut().prep("SELECT expires FROM sessions WHERE username = ? AND session = ?")?; // Prepare a Select statement to get the expiration date from the session of the provided username and session
-        let expires: Option<String> = conn.exec_first(stmt, (user, session_id))?; 
+        let expires: Option<String> = conn.exec_first(stmt, (user, session_id))?;
+        println!("{:?}", &expires); 
         let timestamp: i64 = match DateTime::parse_from_rfc3339(expires.unwrap_or("".to_string()).as_ref()) { // Parse the expired string into a timestamp
             Ok(val) => val.timestamp(),
-            Err(_) => 0,
+            Err(_) => {0},
         };
         let now: i64 = Utc::now().timestamp();
 
@@ -461,6 +462,7 @@ pub mod mysql_handler {
         use crate::mysql_handler;
         use mysql::prelude::Queryable;
         use mysql;
+        use test_log::test;
 
         // Function to get an SQL connection directly from config file
         fn get_sql_pool() -> Result<mysql::Pool, mysql::Error> {
@@ -517,6 +519,8 @@ pub mod mysql_handler {
 
             assert_eq!(None, res); // Session should now be invalid
 
+            delete_all_test_sessions(&pool, user)?;
+
             Ok(())
         }
 
@@ -527,17 +531,20 @@ pub mod mysql_handler {
             let expired_session_id = "0000_testsession_0000_1";
             let valid_session_id = "0000_testsession_0000_2";
             let pool = get_sql_pool()?;
+
+            delete_all_test_sessions(&pool, user)?;
+
             create_test_session(&pool, user, expired_session_id, true)?;
             create_test_session(&pool, user, valid_session_id, false)?;
     
             mysql_handler::delete_expired_sessions(&pool)?;
-    
+
             let res_1 = mysql_handler::verify_session(&pool, user, expired_session_id)?;
             let res_2 = mysql_handler::verify_session(&pool, user, valid_session_id)?;
 
             assert_eq!(None, res_1);
             assert_eq!(Some(user), res_2);
-        
+
             delete_all_test_sessions(&pool, user)?;
 
             Ok(())
