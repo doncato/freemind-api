@@ -82,7 +82,7 @@ pub mod request_handler {
     }
 
     /// Endpoint for fetching the whole document
-    #[post(r"/v1/xml/fetch")]
+    #[post(r"/xml/fetch")]
     async fn post_xml_fetch(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
         if let Some(user) = verify_request(&req, &state).await {        // Verify the request
             let mut path: std::path::PathBuf = state.user_files_path.clone(); // Obtain the user file directory
@@ -130,7 +130,7 @@ pub mod request_handler {
     }
 
     /// Endpoint for uploading new documents
-    #[post(r"/v1/xml/update")]
+    #[post(r"/xml/update")]
     async fn post_xml_update(payload: web::Payload, req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
         if let Some(user) = verify_request(&req, &state).await {         // Verify the request
             let mut path: std::path::PathBuf = state.user_files_path.clone();  // Obtain the users file directory
@@ -165,7 +165,7 @@ pub mod request_handler {
     }
 
     /// Endpoint for just validating documents but not saving them
-    #[post(r"/v1/xml/validate")]
+    #[post(r"/xml/validate")]
     async fn post_xml_validate(payload: web::Payload, req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
         if let Some(user) = verify_request(&req, &state).await {          // Verify the request
             let mut path: std::path::PathBuf = state.user_files_path.clone();   // Obtain users file directory
