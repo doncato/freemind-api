@@ -532,8 +532,6 @@ pub mod mysql_handler {
             let valid_session_id = "0000_testsession_0000_2";
             let pool = get_sql_pool()?;
 
-            delete_all_test_sessions(&pool, user)?;
-
             create_test_session(&pool, user, expired_session_id, true)?;
             create_test_session(&pool, user, valid_session_id, false)?;
     
