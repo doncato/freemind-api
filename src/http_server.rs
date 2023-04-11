@@ -81,6 +81,41 @@ pub mod request_handler {
         Ok(())
     }
 
+    /// Endpoint for getting an Element by ID
+    #[post(r"/xml/get_by_id/{id}")]
+    async fn post_xml_get_by_id(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let queried_id: u16 = req.match_info().get("id").unwrap_or("0").parse().unwrap_or(0);
+            if queried_id == 0 {
+                return Ok(HttpResponse::BadRequest().body("Queried ID is Invalid"))
+            } else {
+                let mut path: std::path::PathBuf = state.user_files_path.clone();
+                path.push(format!("{}.xml", user));
+
+                log::debug!("Got a request to get by id");
+
+                if let Ok(Some(mut content_part)) = xml_engine::get_node_by_id(&path, queried_id).await {
+                    if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
+                        let time = Utc::now().to_rfc2822().replace("+0000", "GMT");
+                        return Ok(
+                            HttpResponse::build(StatusCode::OK)
+                                .content_type(ContentType::xml())
+                                .insert_header(("content-disposition", "attachment"))
+                                .insert_header(("last-modified", time))
+                                .body(response)
+                        )
+                    } else {
+                        return Ok(HttpResponse::InternalServerError().body("500 - Internal Server Error"))    
+                    }
+                } else {
+                    return Ok(HttpResponse::InternalServerError().body("500 - Internal Server Error"))
+                }
+            }
+        } else {
+            return Ok(HttpResponse::Unauthorized().body("Provided Credentials Invalid or Missing")); 
+        }
+    }
+
     /// Endpoint for fetching the whole document
     #[post(r"/xml/fetch")]
     async fn post_xml_fetch(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
@@ -124,7 +159,7 @@ pub mod request_handler {
 
             }
         } else {
-            return Ok(HttpResponse::Unauthorized().body("401 - Unauthorized")); 
+            return Ok(HttpResponse::Unauthorized().body("Provided Credentials Invalid or Missing")); 
         }
 
     }
@@ -142,7 +177,7 @@ pub mod request_handler {
 
             write_body(&path, payload).await?; // Write the path to a temporary file
 
-            let mut response = HttpResponse::Ok().body("200 - OK");
+            let mut response = HttpResponse::Ok().body("Success");
             
             log::debug!("Validating temporary file");
             if let Ok(valid) = xml_engine::validate_xml_payload(&path).await { // Validate the xml document lying under the temporary path
@@ -151,7 +186,7 @@ pub mod request_handler {
                     fs::copy(&path, &final_path)?; //When the file is valid copy the temporary file to the final location
                 } else {
                     log::debug!("Submitted File invalid!");
-                    response = HttpResponse::BadRequest().body("400 - Bad Request"); // When the file is invalid return an error
+                    response = HttpResponse::BadRequest().body("Provided XML Document is invalid"); // When the file is invalid return an error
                 }
             } else {
                 response = HttpResponse::InternalServerError().body("500 - Internal Server Error");
@@ -160,7 +195,7 @@ pub mod request_handler {
             fs::remove_file(&path)?; // Finally delete the temporary file
             return Ok(response)
         } else {
-            return Ok(HttpResponse::Unauthorized().body("401 - Unauthorized")); 
+            return Ok(HttpResponse::Unauthorized().body("Provided Credentials Invalid or Missing")); 
         }
     }
 
@@ -175,7 +210,7 @@ pub mod request_handler {
 
             write_body(&path, payload).await?; // Write the path to a temporary file
 
-            let mut response = HttpResponse::Ok().body("200 - OK");
+            let mut response = HttpResponse::Ok().body("Success");
             
             log::debug!("Validating temporary file");
             if let Ok(valid) = xml_engine::validate_xml_payload(&path).await { // Validate the xml document lying under the temporary path and return according status codes
@@ -183,7 +218,7 @@ pub mod request_handler {
                     log::debug!("File passed validation returning success.");
                 } else {
                     log::debug!("File failed validation.");
-                    response = HttpResponse::BadRequest().body("400 - Bad Request");
+                    response = HttpResponse::BadRequest().body("Provided XML Document is invalid");
                 }
             } else {
                 response = HttpResponse::InternalServerError().body("500 - Internal Server Error");
@@ -192,7 +227,7 @@ pub mod request_handler {
             fs::remove_file(&path)?; // Delete the temporary file
             return Ok(response)
         } else {
-            return Ok(HttpResponse::Unauthorized().body("401 - Unauthorized")); 
+            return Ok(HttpResponse::Unauthorized().body("Provided Credentials Invalid or Missing")); 
         }
     }
 

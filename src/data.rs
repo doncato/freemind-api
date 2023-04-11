@@ -192,6 +192,55 @@ pub mod xml_engine {
         Ok(buf)
     }
 
+    /// Takes a range of underlying content of a file and searches before and after
+    /// the specified range for xml openings and closings. It then returns a new
+    /// modified range. Actually opens the file for this
+    fn extend_partial_to_full_node(path: &std::path::PathBuf, range: Range<usize>) -> Result<Range<usize>, std::io::Error> {
+        let mut f = File::open(path)?;
+        
+        let mut start: u64 = range.start.try_into().unwrap();
+        let mut end: u64 = range.end.try_into().unwrap();
+
+        // Look before the start
+        f.seek(SeekFrom::Start(start))?;
+        let mut buf: [u8; 1] = b" ".to_owned();
+        while &buf != b"<" && buf != [0] {
+            start = start - 1;
+            f.seek(SeekFrom::Start(start))?;
+            f.read(&mut buf)?;
+        }
+
+        // Look after the end
+        f.seek(SeekFrom::Start(end))?;
+        let mut buf: [u8; 1] = b" ".to_owned();
+        while &buf != b">" && buf != [0] {
+            f.read(&mut buf)?;
+            end = f.stream_position()?;
+        }
+
+        return Ok(Range {start: start as usize, end: end as usize});
+    }
+
+    /// Generates a String object that represents a valid partial document
+    /// uses the path to generate meta section automatically and fills in the
+    /// content at the partial node
+    pub fn generate_partial(path: &std::path::PathBuf, content: &mut Take<File>) -> Result<String, quick_xml::Error> {
+        let mut result = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><meta><existing_ids><id>".to_string();
+        let ids = collect_all_ids(path)?
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<String>>()
+            .join("</id><id>");
+        result.push_str(&ids);
+        result.push_str("</id></existing_ids></meta><part>");
+        let mut part: String = "".to_string();
+        content.read_to_string(&mut part)?;
+        result.push_str(&part);
+        result.push_str("</part>");
+
+        return Ok(result)
+    }
+
     /// Returns any node identified by it's id attribute
     pub async fn get_node_by_id(path: &std::path::PathBuf, queried_id: u16) -> Result<Option<Take<File>>, quick_xml::Error> {
         let mut xml_reader = XmlReader::from_file(path)?;
@@ -200,7 +249,8 @@ pub mod xml_engine {
             match xml_reader.read_event_into(&mut buf)? {
                 XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
                     if let Some(ctx) = find_node_by_id(&mut xml_reader, queried_id)? {
-                        return Ok(Some(get_partial_document(path, ctx)?))
+                        let extended_ctx = extend_partial_to_full_node(path, ctx)?;
+                        return Ok(Some(get_partial_document(path, extended_ctx)?))
                     } else {
                         return Ok(None);
                     }
@@ -344,10 +394,12 @@ pub mod xml_engine {
             }
             assert_eq!(
                 r,
-                Some("<type>ToDo</type>
+                Some("<entry id=\"5\">
+                <type>ToDo</type>
                 <name>Element 4</name>
                 <description>Lorem ipsum dolor sit amet</description>
-                <due>1676134800</due>".to_string())
+                <due>1676134800</due>
+            </entry>".to_string())
             );
 
             let r: Option<String>;
@@ -360,7 +412,8 @@ pub mod xml_engine {
             }
             assert_eq!(
                 r,
-                Some("".to_string())
+                Some("<directory id=\"22223\">
+        </directory>".to_string())
             );
             Ok(())
         }

@@ -52,7 +52,7 @@ bcrypt hash in the database
 - `/v1/act/get_next_due` To get the next due node
 - `/v1/act/get_next_priority` To get the next node with the highest priority.
 - `/v1/act/get_today` To get only nodes wich are due or on today.
-- `/v1/act/get_tomoroorw` To get only nodes which are due or on tomorrow.
+- `/v1/act/get_tomorrow` To get only nodes which are due or on tomorrow.
 - `/v1/act/filter/NAME/VALUE` To only get nodes which have subnodes called NAME whose value equals VALUE (not case sensitive)
 - `/v1/json/fetch` To fetch the whole XML document but returned as JSON.
 - `/v1/json/sort_by/due` To get the nodes as json sorted by due
