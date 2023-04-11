@@ -452,7 +452,6 @@ pub mod mysql_handler {
         let mut conn: mysql::PooledConn = pool.get_conn()?; // Obtain a pooled connection to the database
         let stmt = conn.as_mut().prep("SELECT expires FROM sessions WHERE username = ? AND session = ?")?; // Prepare a Select statement to get the expiration date from the session of the provided username and session
         let expires: Option<String> = conn.exec_first(stmt, (user, session_id))?;
-        println!("{:?}", &expires); 
         let timestamp: i64 = match DateTime::parse_from_rfc3339(expires.unwrap_or("".to_string()).as_ref()) { // Parse the expired string into a timestamp
             Ok(val) => val.timestamp(),
             Err(_) => {0},
