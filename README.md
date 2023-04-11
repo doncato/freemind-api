@@ -3,14 +3,16 @@ This is the Api server of the Freemind project.
 
 ## TODOs
 - Add more endpoints
+- Use user ID's instead of names as the primary key for stuff
 
 ## LIMITATIONS
 ### Elements
 Each Element (each entry and directory node) must have an unique ID which is
 (as of now) saved and handled as an unsigned 16 bit integer. Meaning you can
-have 'only' about 65535 entries. Although the more you approach this number
-the longer generation of new entries might take. As of now I don't think that
-anyone needs more than 1000 entries registred at once.
+have 'only' about 65535 entries. The ID `0` **SHOULD NOT** be used Although
+the more you approach this number the longer generation of new entries might
+take. As of now I don't think that anyone needs more than 1000 entries
+registred at once.
 
 ## SETUP
 ### 1. Installation
