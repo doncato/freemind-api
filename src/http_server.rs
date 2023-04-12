@@ -94,7 +94,7 @@ pub mod request_handler {
 
                 log::debug!("Got a request to get by id");
 
-                if let Ok(Some(mut content_part)) = xml_engine::get_node_by_id(&path, queried_id).await {
+                if let Ok(mut content_part) = xml_engine::get_node_by_id(&path, queried_id).await {
                     if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
                         let time = Utc::now().to_rfc2822().replace("+0000", "GMT");
                         return Ok(

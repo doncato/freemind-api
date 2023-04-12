@@ -224,7 +224,7 @@ pub mod xml_engine {
     /// Generates a String object that represents a valid partial document
     /// uses the path to generate meta section automatically and fills in the
     /// content at the partial node
-    pub fn generate_partial(path: &std::path::PathBuf, content: &mut Take<File>) -> Result<String, quick_xml::Error> {
+    pub fn generate_partial(path: &std::path::PathBuf, content: &mut Option<Take<File>>) -> Result<String, quick_xml::Error> {
         let mut result = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><meta><existing_ids><id>".to_string();
         let ids = collect_all_ids(path)?
             .into_iter()
@@ -233,9 +233,11 @@ pub mod xml_engine {
             .join("</id><id>");
         result.push_str(&ids);
         result.push_str("</id></existing_ids></meta><part>");
-        let mut part: String = "".to_string();
-        content.read_to_string(&mut part)?;
-        result.push_str(&part);
+        if let Some(cont) = content {
+            let mut part: String = "".to_string();
+            cont.read_to_string(&mut part)?;
+            result.push_str(&part);
+        }
         result.push_str("</part>");
 
         return Ok(result)
