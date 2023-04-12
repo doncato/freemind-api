@@ -3,8 +3,16 @@ This is the Api server of the Freemind project.
 
 ## TODOs
 - Add more endpoints
-- Improve the xml verification
-  - Check that the id's occur only once
+- Use user ID's instead of names as the primary key for stuff
+
+## LIMITATIONS
+### Elements
+Each Element (each entry and directory node) must have an unique ID which is
+(as of now) saved and handled as an unsigned 16 bit integer. Meaning you can
+have 'only' about 65535 entries. The ID `0` **SHOULD NOT** be used Although
+the more you approach this number the longer generation of new entries might
+take. As of now I don't think that anyone needs more than 1000 entries
+registred at once.
 
 ## SETUP
 ### 1. Installation
@@ -34,18 +42,19 @@ bcrypt hash in the database
 
 ## Endpoints
 ### Existing
-- `/v1/xml/fetch` To fetch the whole XML document.
-- `/v1/xml/update` To update the whole XML document.
-- `/v1/xml/validate` To validate a XML document but not actually perform any changes.
+- `/xml/get_by_id/{id}` To fetch a partial XML document specifed by it's id
+- `/xml/fetch` To fetch the whole XML document.
+- `/xml/update` To update the whole XML document.
+- `/xml/validate` To validate a XML document but not actually perform any changes.
 
 ### Planned
-- `/v1/act/delete_old` To delete nodes which are past due
-- `/v1/act/delete_past/TIMESTAMP` To delete nodes which due is passed on TIMESTAMP
-- `/v1/act/get_next_due` To get the next due node
-- `/v1/act/get_next_priority` To get the next node with the highest priority.
-- `/v1/act/get_today` To get only nodes wich are due or on today.
-- `/v1/act/get_tomoroorw` To get only nodes which are due or on tomorrow.
-- `/v1/act/filter/NAME/VALUE` To only get nodes which have subnodes called NAME whose value equals VALUE (not case sensitive)
-- `/v1/json/fetch` To fetch the whole XML document but returned as JSON.
-- `/v1/json/sort_by/due` To get the nodes as json sorted by due
-- `/v1/json/sort_by/priority` To get the nodes as json sorted by priority
+- `/act/delete_old` To delete nodes which are past due
+- `/act/delete_past/TIMESTAMP` To delete nodes which due is passed on TIMESTAMP
+- `/act/get_next_due` To get the next due node
+- `/act/get_next_priority` To get the next node with the highest priority.
+- `/act/get_today` To get only nodes wich are due or on today.
+- `/act/get_tomorrow` To get only nodes which are due or on tomorrow.
+- `/act/filter/NAME/VALUE` To only get nodes which have subnodes called NAME whose value equals VALUE (not case sensitive)
+- `/json/fetch` To fetch the whole XML document but returned as JSON.
+- `/json/sort_by/due` To get the nodes as json sorted by due
+- `/json/sort_by/priority` To get the nodes as json sorted by priority

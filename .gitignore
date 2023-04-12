@@ -4,3 +4,4 @@ Cargo.lock
 /debug
 /users
 freemind.config
+freemind.log

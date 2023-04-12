@@ -80,29 +80,345 @@ pub mod data_types {
 /// Does all of the nice xml parsing and handling
 /// - knows what xml is
 pub mod xml_engine {
+    use core::ops::Range;
+    use quick_xml::events::{Event as XmlEvent, BytesStart};
     use quick_xml::reader::Reader as XmlReader;
-    use quick_xml::events::Event as XmlEvent;
     use quick_xml;
+    use std::fs::File;
+    use std::io::{BufReader, SeekFrom, Seek, Read, Take};
+
+    /// Gets the value of the id attribute of any node
+    fn get_id_attribute<'a>(reader: &XmlReader<BufReader<File>>, element: BytesStart<'a>) -> Result<Option<u16>, quick_xml::Error> {
+        for attribute in element.attributes() {
+            if let Ok(val) = attribute {
+                if val.key.local_name().as_ref() == b"id" {
+                    let v = val.decode_and_unescape_value(&reader)?.to_string();
+                    return match v.parse::<u16>() {
+                        Ok(val) => Ok(Some(val)),
+                        Err(_) => Ok(None),
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Read through event and  nodes in the registry. Calls this function
+    /// recursively if it finds a directory entry
+    fn read_registry_nodes(reader: &mut XmlReader<BufReader<File>>) -> Result<Option<Vec<u16>>, quick_xml::Error> {
+        //let xml_reader = XmlReader::from_reader(reader);
+        let mut buf: Vec<u8> = Vec::new();
+        let mut ids: Vec<u16> = Vec::new();
+
+        loop { // Iterate over the xml reader
+            match reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == b"entry" => {
+                    if let Some(id) = get_id_attribute(&reader, e)? {
+                        ids.push(id);
+                    } else {
+                        return Ok(None) // Meaning there was an entry without an id which is illegal
+                    }
+                }
+                XmlEvent::Start(e) if e.name().as_ref() == b"directory" => {
+                    if let Some(id) = get_id_attribute(&reader, e)? {
+                        ids.push(id);
+                        if let Some(contained_ids) = read_registry_nodes(reader)? {
+                            ids.extend(contained_ids);
+                        } else {
+                            return Ok(None)
+                        }
+                    } else {
+                        return Ok(None)
+                    }
+                }
+                XmlEvent::Start(_e) => {}
+                XmlEvent::End(e) if e.name().as_ref() == b"directory" => break,
+                XmlEvent::End(e) if e.name().as_ref() == b"registry" => break,
+                XmlEvent::Eof => break, // Maybe it should return false in this case as when it reaches this point there wasn't an end tag for the registry
+                _ => (),
+            }
+
+        }
+        Ok(Some(ids))
+    }
+
+    ///  Reads through the content of a registry to find a node with matching id.
+    /// Calls the function recursively to go through directories
+    fn find_node_by_id(reader: &mut XmlReader<BufReader<File>>, queried_id: u16) -> Result<Option<Range<usize>>, quick_xml::Error> {
+        let mut buf: Vec<u8> = Vec::new();
+        loop {
+            match reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == b"entry" => {
+                    if let Some(id) = get_id_attribute(&reader, e.clone())? {
+                        if id == queried_id {
+                            let mut small_buf: Vec<u8> = Vec::new();
+                            let ctx = reader.read_to_end_into(e.to_end().name(), &mut small_buf)?;
+                            return Ok(Some(ctx));
+                        }
+                    }
+                },
+                XmlEvent::Start(e) if e.name().as_ref() == b"directory" => {
+                    if let Some(id) = get_id_attribute(&reader, e.clone())? {
+                        if id == queried_id {
+                            let mut small_buf: Vec<u8> = Vec::new();
+                            let ctx = reader.read_to_end_into(e.to_end().name(), &mut small_buf)?;
+                            return Ok(Some(ctx));
+                        }
+                    }
+                    if let Some(result) = find_node_by_id(reader, queried_id)? {
+                        return Ok(Some(result));
+                    }
+                },
+                XmlEvent::Start(_e) => {},
+                XmlEvent::End(e) if e.name().as_ref() == b"directory" => break,
+                XmlEvent::End(e) if e.name().as_ref() == b"registry" => break,
+                XmlEvent::Eof => break,
+                _ => (),
+            }
+
+        }
+
+        Ok(None)
+    }
+
+
+    /// Gets a specified part of a document located under `path` and returns the
+    /// underlying content from start byte to end byte, where start and end are
+    /// defined with the range param
+    fn get_partial_document(path: &std::path::PathBuf, range: Range<usize>) -> Result<Take<File>, std::io::Error> {
+        let mut f = File::open(path)?;
+        f.seek(SeekFrom::Start(range.start.try_into().unwrap()))?;
+        let buf = f.take((range.end - range.start).try_into().unwrap());
+        Ok(buf)
+    }
+
+    /// Takes a range of underlying content of a file and searches before and after
+    /// the specified range for xml openings and closings. It then returns a new
+    /// modified range. Actually opens the file for this
+    fn extend_partial_to_full_node(path: &std::path::PathBuf, range: Range<usize>) -> Result<Range<usize>, std::io::Error> {
+        let mut f = File::open(path)?;
+        
+        let mut start: u64 = range.start.try_into().unwrap();
+        let mut end: u64 = range.end.try_into().unwrap();
+
+        // Look before the start
+        f.seek(SeekFrom::Start(start))?;
+        let mut buf: [u8; 1] = b" ".to_owned();
+        while &buf != b"<" && buf != [0] {
+            start = start - 1;
+            f.seek(SeekFrom::Start(start))?;
+            f.read(&mut buf)?;
+        }
+
+        // Look after the end
+        f.seek(SeekFrom::Start(end))?;
+        let mut buf: [u8; 1] = b" ".to_owned();
+        while &buf != b">" && buf != [0] {
+            f.read(&mut buf)?;
+            end = f.stream_position()?;
+        }
+
+        return Ok(Range {start: start as usize, end: end as usize});
+    }
+
+    /// Generates a String object that represents a valid partial document
+    /// uses the path to generate meta section automatically and fills in the
+    /// content at the partial node
+    pub fn generate_partial(path: &std::path::PathBuf, content: &mut Option<Take<File>>) -> Result<String, quick_xml::Error> {
+        let mut result = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><meta><existing_ids><id>".to_string();
+        let ids = collect_all_ids(path)?
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<String>>()
+            .join("</id><id>");
+        result.push_str(&ids);
+        result.push_str("</id></existing_ids></meta><part>");
+        if let Some(cont) = content {
+            let mut part: String = "".to_string();
+            cont.read_to_string(&mut part)?;
+            result.push_str(&part);
+        }
+        result.push_str("</part>");
+
+        return Ok(result)
+    }
+
+    /// Returns any node identified by it's id attribute
+    pub async fn get_node_by_id(path: &std::path::PathBuf, queried_id: u16) -> Result<Option<Take<File>>, quick_xml::Error> {
+        let mut xml_reader = XmlReader::from_file(path)?;
+        let mut buf: Vec<u8> = Vec::new();
+        loop {
+            match xml_reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
+                    if let Some(ctx) = find_node_by_id(&mut xml_reader, queried_id)? {
+                        let extended_ctx = extend_partial_to_full_node(path, ctx)?;
+                        return Ok(Some(get_partial_document(path, extended_ctx)?))
+                    } else {
+                        return Ok(None);
+                    }
+                },
+                XmlEvent::Start(_e) => {},
+                XmlEvent::Eof => break,
+                _ => (),
+            }
+        }
+        Ok(None)
+    }
+
+    /// Returns all IDs present in the registry (will return them sorted)
+    /// Performs no validation at all!
+    pub fn collect_all_ids(path: &std::path::PathBuf) -> Result<Vec<u16>, quick_xml::Error> {
+        let mut xml_reader = XmlReader::from_file(path)?;
+        let mut buf: Vec<u8> = Vec::new();
+        let mut ids: Vec<u16> = Vec::new();
+        loop {
+            match xml_reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
+                    if let Some(res) = read_registry_nodes(&mut xml_reader)? {
+                        ids.extend(res);
+                    }
+                    ids.sort_unstable(); // unstable is faster and lighter on memory says the documentation
+                },
+                XmlEvent::Start(_e) => {},
+                XmlEvent::Eof => break, // Stop the iteration when the file ends
+                _ => (),
+            }
+        }
+        Ok(ids)
+    }
 
     /// Validates any xml document located under *path*
     pub async fn validate_xml_payload(path: &std::path::PathBuf) -> Result<bool, quick_xml::Error> {
-        let mut registry_count: u8 = 0; // Counter to check how often a registry node exists
+        let mut registry_count: u8 = 0;
 
-        let mut xml_reader = XmlReader::from_file(path)?; // I just hope this doesn't error // Reader for the xml file
-        let mut buf = Vec::new(); // A buffer to read into
-        loop { // Iterate over the xml reader
+        let mut xml_reader = XmlReader::from_file(path)?;
+        let mut buf: Vec<u8> = Vec::new();
+        let mut ids: Vec<u16> = Vec::new();
+        loop {
             match xml_reader.read_event_into(&mut buf)? {
-                XmlEvent::Start(e) => { // As if I'd know what is going on here
-                    match e.name().as_ref() { // ???
-                        b"registry" => registry_count += 1, // If a registry node is found increase the counter
-                        _ => (), 
+                XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
+                    // Traverse through the registry
+                    registry_count += 1;
+                    if let Some(res) = read_registry_nodes(&mut xml_reader)? {
+                        ids.extend(res);
+                    } else {
+                        return Ok(false)
                     }
-                }
+                    let length_then = ids.len();
+                    ids.sort_unstable(); // unstable is faster and lighter on memory says the documentation
+                    ids.dedup();
+                    let lenght_now = ids.len();
+                    if lenght_now != length_then { // Meaning there were duplicates removed
+                        return Ok(false) // Duplicates are not allowed
+                    }
+                },
+                XmlEvent::Start(e) if e.name().as_ref() == b"meta" => {
+                    // Traverse through the meta
+                },
+                XmlEvent::Start(_e) => {},
                 XmlEvent::Eof => break, // Stop the iteration when the file ends
                 _ => (),
             }
         }
         Ok(registry_count == 1) // There should be only one registry so yeah guess the rest
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::data::xml_engine;
+        use quick_xml;
+        use std::{path::PathBuf, io::Read};
+        use tokio;
+
+        /// Verifies that all xml documents are accepted or rejected as they should
+        #[tokio::test]
+        async fn test_xml_validation() -> Result<(), quick_xml::Error> {
+            assert_eq!(
+                xml_engine::validate_xml_payload(&PathBuf::from("./tests/documents/valid_1.xml")).await?,
+                true
+            );
+            assert_eq!(
+                xml_engine::validate_xml_payload(&PathBuf::from("./tests/documents/valid_2.xml")).await?,
+                true
+            );
+            assert_eq!(
+                xml_engine::validate_xml_payload(&PathBuf::from("./tests/documents/invalid_1.xml")).await?,
+                false
+            );
+            assert_eq!(
+                xml_engine::validate_xml_payload(&PathBuf::from("./tests/documents/invalid_2.xml")).await?,
+                false
+            );
+            assert_eq!(
+                xml_engine::validate_xml_payload(&PathBuf::from("./tests/documents/invalid_3.xml")).await?,
+                false
+            );
+            Ok(())
+        }
+
+        /// Verifies that ids are collected correctly
+        #[test]
+        fn test_id_collection() -> Result<(), quick_xml::Error> {
+            assert_eq!(
+                xml_engine::collect_all_ids(&PathBuf::from("./tests/documents/valid_1.xml"))?,
+                vec![5, 12845, 22222, 22223, 43362, 43363, 46233]
+            );
+            assert_eq!(
+                xml_engine::collect_all_ids(&PathBuf::from("./tests/documents/valid_2.xml"))?,
+                vec![12845, 22222, 22223, 43362, 46233]
+            );
+            Ok(())
+        }
+
+        /// Verifies that nodes are found by id correctly
+        #[tokio::test]
+        async fn test_id_fetching() -> Result<(), quick_xml::Error> {
+            let r: Option<String>;
+            let mut res: String = String::new();
+            if let Some(mut take) = xml_engine::get_node_by_id(&PathBuf::from("./tests/documents/valid_1.xml"), 0).await? {
+                take.read_to_string(&mut res)?;
+                r = Some(res.trim().to_string());
+            } else {
+                r = None;
+            }
+            assert_eq!(
+                r,
+                None
+            );
+            
+            let r: Option<String>;
+            let mut res: String = String::new();
+            if let Some(mut take) = xml_engine::get_node_by_id(&PathBuf::from("./tests/documents/valid_1.xml"), 5).await? {
+                take.read_to_string(&mut res)?;
+                r = Some(res.trim().to_string());
+            } else {
+                r = None;
+            }
+            assert_eq!(
+                r,
+                Some("<entry id=\"5\">
+                <type>ToDo</type>
+                <name>Element 4</name>
+                <description>Lorem ipsum dolor sit amet</description>
+                <due>1676134800</due>
+            </entry>".to_string())
+            );
+
+            let r: Option<String>;
+            let mut res: String = String::new();
+            if let Some(mut take) = xml_engine::get_node_by_id(&PathBuf::from("./tests/documents/valid_2.xml"), 22223).await? {
+                take.read_to_string(&mut res)?;
+                r = Some(res.trim().to_string());
+            } else {
+                r = None;
+            }
+            assert_eq!(
+                r,
+                Some("<directory id=\"22223\">
+        </directory>".to_string())
+            );
+            Ok(())
+        }
     }
 }
 
@@ -112,8 +428,8 @@ pub mod xml_engine {
 pub mod mysql_handler {
     use bcrypt;
     use chrono::{DateTime, offset::Utc};
-    use mysql;
     use mysql::prelude::Queryable;
+    use mysql;
 
     /// Verify a user using a token against the database
     pub fn verify_user<'a>(pool: &mysql::Pool, user: &'a str, token: &str) -> Result<Option<&'a str>, mysql::Error> {
@@ -137,10 +453,10 @@ pub mod mysql_handler {
     pub fn verify_session<'a>(pool: &mysql::Pool, user: &'a str, session_id: &str) -> Result<Option<&'a str>, mysql::Error> {
         let mut conn: mysql::PooledConn = pool.get_conn()?; // Obtain a pooled connection to the database
         let stmt = conn.as_mut().prep("SELECT expires FROM sessions WHERE username = ? AND session = ?")?; // Prepare a Select statement to get the expiration date from the session of the provided username and session
-        let expires: Option<String> = conn.exec_first(stmt, (user, session_id))?; 
+        let expires: Option<String> = conn.exec_first(stmt, (user, session_id))?;
         let timestamp: i64 = match DateTime::parse_from_rfc3339(expires.unwrap_or("".to_string()).as_ref()) { // Parse the expired string into a timestamp
             Ok(val) => val.timestamp(),
-            Err(_) => 0,
+            Err(_) => {0},
         };
         let now: i64 = Utc::now().timestamp();
 
@@ -195,11 +511,12 @@ pub mod mysql_handler {
 
     #[cfg(test)]
     mod tests {
+        use chrono::{naive::Days, offset::Utc};
         use crate::data::data_types::AppConfig;
         use crate::mysql_handler;
-        use chrono::{naive::Days, offset::Utc};
-        use mysql;
         use mysql::prelude::Queryable;
+        use mysql;
+        use test_log::test;
 
         // Function to get an SQL connection directly from config file
         fn get_sql_pool() -> Result<mysql::Pool, mysql::Error> {
@@ -256,6 +573,8 @@ pub mod mysql_handler {
 
             assert_eq!(None, res); // Session should now be invalid
 
+            delete_all_test_sessions(&pool, user)?;
+
             Ok(())
         }
 
@@ -266,17 +585,18 @@ pub mod mysql_handler {
             let expired_session_id = "0000_testsession_0000_1";
             let valid_session_id = "0000_testsession_0000_2";
             let pool = get_sql_pool()?;
+
             create_test_session(&pool, user, expired_session_id, true)?;
             create_test_session(&pool, user, valid_session_id, false)?;
     
             mysql_handler::delete_expired_sessions(&pool)?;
-    
+
             let res_1 = mysql_handler::verify_session(&pool, user, expired_session_id)?;
             let res_2 = mysql_handler::verify_session(&pool, user, valid_session_id)?;
 
             assert_eq!(None, res_1);
             assert_eq!(Some(user), res_2);
-        
+
             delete_all_test_sessions(&pool, user)?;
 
             Ok(())
