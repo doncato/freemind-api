@@ -4,6 +4,7 @@ This is the Api server of the Freemind project.
 ## TODOs
 - Add more endpoints
 - Use user ID's instead of names as the primary key for stuff
+- Work more with async in the xml engine
 
 ## LIMITATIONS
 ### Elements

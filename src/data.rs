@@ -86,6 +86,7 @@ pub mod xml_engine {
     use quick_xml;
     use std::fs::File;
     use std::io::{BufReader, SeekFrom, Seek, Read, Take};
+    use std::path::PathBuf;
 
     /// Gets the value of the id attribute of any node
     fn get_id_attribute<'a>(reader: &XmlReader<BufReader<File>>, element: BytesStart<'a>) -> Result<Option<u16>, quick_xml::Error> {
@@ -103,7 +104,39 @@ pub mod xml_engine {
         Ok(None)
     }
 
-    /// Read through event and  nodes in the registry. Calls this function
+    /// Checks if the subnode identified by 'name' containing 'value' exists within 'element'
+    fn subnode_exists(path: &PathBuf, reader: &mut XmlReader<BufReader<File>>, element: String, name: String, value: String) -> Result<bool, quick_xml::Error> {
+        let mut buf: Vec<u8> = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == name.as_bytes() => {
+                    let mut txt_buf: Vec<u8> = Vec::new();
+                    let mut text = String::new();
+                    let text_range = reader.read_to_end_into(e.to_end().name(), &mut txt_buf)?;
+                    get_partial_document(&path, text_range)?.read_to_string(&mut text)?;
+                    return Ok(text.trim().to_string() == value)
+                }
+                XmlEvent::End(e) if e.name().as_ref() == element.as_bytes() => {
+                    return Ok(false) // End of the current element is reached, so we can return false 
+                }
+                XmlEvent::Start(e) if e.name().as_ref() == b"info" => {
+                    // Not entirely certain but in theory when the info node of
+                    // a directory comes we need to check the subnodes in that
+                    // info node and return the state for the directory
+                    // I think this is what this does
+                    return subnode_exists(path, reader, element, name, value)
+                }
+                XmlEvent::End(e) if e.name().as_ref() == b"registry" => break,
+                XmlEvent::Eof => break,
+                _ => (),
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Read through event and directory nodes in the registry. Calls this function
     /// recursively if it finds a directory entry
     fn read_registry_nodes(reader: &mut XmlReader<BufReader<File>>) -> Result<Option<Vec<u16>>, quick_xml::Error> {
         //let xml_reader = XmlReader::from_reader(reader);
@@ -131,7 +164,6 @@ pub mod xml_engine {
                         return Ok(None)
                     }
                 }
-                XmlEvent::Start(_e) => {}
                 XmlEvent::End(e) if e.name().as_ref() == b"directory" => break,
                 XmlEvent::End(e) if e.name().as_ref() == b"registry" => break,
                 XmlEvent::Eof => break, // Maybe it should return false in this case as when it reaches this point there wasn't an end tag for the registry
@@ -169,7 +201,6 @@ pub mod xml_engine {
                         return Ok(Some(result));
                     }
                 },
-                XmlEvent::Start(_e) => {},
                 XmlEvent::End(e) if e.name().as_ref() == b"directory" => break,
                 XmlEvent::End(e) if e.name().as_ref() == b"registry" => break,
                 XmlEvent::Eof => break,
@@ -185,7 +216,7 @@ pub mod xml_engine {
     /// Gets a specified part of a document located under `path` and returns the
     /// underlying content from start byte to end byte, where start and end are
     /// defined with the range param
-    fn get_partial_document(path: &std::path::PathBuf, range: Range<usize>) -> Result<Take<File>, std::io::Error> {
+    fn get_partial_document(path: &PathBuf, range: Range<usize>) -> Result<Take<File>, std::io::Error> {
         let mut f = File::open(path)?;
         f.seek(SeekFrom::Start(range.start.try_into().unwrap()))?;
         let buf = f.take((range.end - range.start).try_into().unwrap());
@@ -195,7 +226,7 @@ pub mod xml_engine {
     /// Takes a range of underlying content of a file and searches before and after
     /// the specified range for xml openings and closings. It then returns a new
     /// modified range. Actually opens the file for this
-    fn extend_partial_to_full_node(path: &std::path::PathBuf, range: Range<usize>) -> Result<Range<usize>, std::io::Error> {
+    fn extend_partial_to_full_node(path: &PathBuf, range: Range<usize>) -> Result<Range<usize>, std::io::Error> {
         let mut f = File::open(path)?;
         
         let mut start: u64 = range.start.try_into().unwrap();
@@ -224,7 +255,7 @@ pub mod xml_engine {
     /// Generates a String object that represents a valid partial document
     /// uses the path to generate meta section automatically and fills in the
     /// content at the partial node
-    pub fn generate_partial(path: &std::path::PathBuf, content: &mut Option<Take<File>>) -> Result<String, quick_xml::Error> {
+    pub fn generate_partial(path: &PathBuf, content: &mut Vec<Take<File>>) -> Result<String, quick_xml::Error> {
         let mut result = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><meta><existing_ids><id>".to_string();
         let ids = collect_all_ids(path)?
             .into_iter()
@@ -233,18 +264,32 @@ pub mod xml_engine {
             .join("</id><id>");
         result.push_str(&ids);
         result.push_str("</id></existing_ids></meta><part>");
-        if let Some(cont) = content {
+        content.iter_mut().for_each(|cont: &mut Take<File>| {
             let mut part: String = "".to_string();
-            cont.read_to_string(&mut part)?;
-            result.push_str(&part);
-        }
+            // My plan here was to just pass the error through, as always, but
+            // I couldn't do it as I couldn't figure out how to return something
+            // from a closure. However, read_to_string only fails in case of
+            // invalid encoding in which case other functions should have failed
+            // previously so I guess it is not that important. Still if you
+            // know how to return through closures fixme pls!
+            match cont.read_to_string(&mut part) {
+                Ok(_) => {result.push_str(&part)},
+                Err(_) => {return}
+            };
+        });
         result.push_str("</part>");
 
         return Ok(result)
     }
 
+    pub fn filter_subnode(path: &PathBuf, name: String, value: String) -> Result<Vec<Take<File>>, quick_xml::Error> {
+        return Ok(Vec::new())
+    }
+
     /// Returns any node identified by it's id attribute
-    pub async fn get_node_by_id(path: &std::path::PathBuf, queried_id: u16) -> Result<Option<Take<File>>, quick_xml::Error> {
+    /// Returns a Take of the provided file containig the node with the searched
+    /// id or returns None if no such node exists.
+    pub async fn get_node_by_id(path: &PathBuf, queried_id: u16) -> Result<Vec<Take<File>>, quick_xml::Error> {
         let mut xml_reader = XmlReader::from_file(path)?;
         let mut buf: Vec<u8> = Vec::new();
         loop {
@@ -252,9 +297,9 @@ pub mod xml_engine {
                 XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
                     if let Some(ctx) = find_node_by_id(&mut xml_reader, queried_id)? {
                         let extended_ctx = extend_partial_to_full_node(path, ctx)?;
-                        return Ok(Some(get_partial_document(path, extended_ctx)?))
+                        return Ok(vec![get_partial_document(path, extended_ctx)?])
                     } else {
-                        return Ok(None);
+                        return Ok(Vec::new());
                     }
                 },
                 XmlEvent::Start(_e) => {},
@@ -262,12 +307,12 @@ pub mod xml_engine {
                 _ => (),
             }
         }
-        Ok(None)
+        Ok(Vec::new())
     }
 
     /// Returns all IDs present in the registry (will return them sorted)
     /// Performs no validation at all!
-    pub fn collect_all_ids(path: &std::path::PathBuf) -> Result<Vec<u16>, quick_xml::Error> {
+    pub fn collect_all_ids(path: &PathBuf) -> Result<Vec<u16>, quick_xml::Error> {
         let mut xml_reader = XmlReader::from_file(path)?;
         let mut buf: Vec<u8> = Vec::new();
         let mut ids: Vec<u16> = Vec::new();
@@ -288,7 +333,7 @@ pub mod xml_engine {
     }
 
     /// Validates any xml document located under *path*
-    pub async fn validate_xml_payload(path: &std::path::PathBuf) -> Result<bool, quick_xml::Error> {
+    pub async fn validate_xml_payload(path: &PathBuf) -> Result<bool, quick_xml::Error> {
         let mut registry_count: u8 = 0;
 
         let mut xml_reader = XmlReader::from_file(path)?;
@@ -375,8 +420,9 @@ pub mod xml_engine {
         async fn test_id_fetching() -> Result<(), quick_xml::Error> {
             let r: Option<String>;
             let mut res: String = String::new();
-            if let Some(mut take) = xml_engine::get_node_by_id(&PathBuf::from("./tests/documents/valid_1.xml"), 0).await? {
-                take.read_to_string(&mut res)?;
+            let mut take = xml_engine::get_node_by_id(&PathBuf::from("./tests/documents/valid_1.xml"), 0).await?;
+            if !take.is_empty() {
+                take[0].read_to_string(&mut res)?;
                 r = Some(res.trim().to_string());
             } else {
                 r = None;
@@ -388,8 +434,9 @@ pub mod xml_engine {
             
             let r: Option<String>;
             let mut res: String = String::new();
-            if let Some(mut take) = xml_engine::get_node_by_id(&PathBuf::from("./tests/documents/valid_1.xml"), 5).await? {
-                take.read_to_string(&mut res)?;
+            let mut take = xml_engine::get_node_by_id(&PathBuf::from("./tests/documents/valid_1.xml"), 5).await?;
+            if !take.is_empty() {
+                take[0].read_to_string(&mut res)?;
                 r = Some(res.trim().to_string());
             } else {
                 r = None;
@@ -406,8 +453,9 @@ pub mod xml_engine {
 
             let r: Option<String>;
             let mut res: String = String::new();
-            if let Some(mut take) = xml_engine::get_node_by_id(&PathBuf::from("./tests/documents/valid_2.xml"), 22223).await? {
-                take.read_to_string(&mut res)?;
+            let mut take = xml_engine::get_node_by_id(&PathBuf::from("./tests/documents/valid_2.xml"), 22223).await?;
+            if !take.is_empty() {
+                take[0].read_to_string(&mut res)?;
                 r = Some(res.trim().to_string());
             } else {
                 r = None;
