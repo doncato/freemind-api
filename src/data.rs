@@ -85,6 +85,7 @@ pub mod xml_engine {
     use quick_xml::reader::Reader as XmlReader;
     use quick_xml;
     use std::fs::File;
+    use std::str;
     use std::io::{BufReader, SeekFrom, Seek, Read, Take};
     use std::path::PathBuf;
 
@@ -105,7 +106,7 @@ pub mod xml_engine {
     }
 
     /// Checks if the subnode identified by 'name' containing 'value' exists within 'element'
-    fn subnode_exists(path: &PathBuf, reader: &mut XmlReader<BufReader<File>>, element: String, name: String, value: String) -> Result<bool, quick_xml::Error> {
+    fn subnode_exists(path: &PathBuf, reader: &mut XmlReader<BufReader<File>>, element: &[u8], name: &String, value: &String) -> Result<bool, quick_xml::Error> {
         let mut buf: Vec<u8> = Vec::new();
 
         loop {
@@ -115,9 +116,9 @@ pub mod xml_engine {
                     let mut text = String::new();
                     let text_range = reader.read_to_end_into(e.to_end().name(), &mut txt_buf)?;
                     get_partial_document(&path, text_range)?.read_to_string(&mut text)?;
-                    return Ok(text.trim().to_string() == value)
+                    return Ok(&text.trim().to_string().to_lowercase() == &value.to_lowercase())
                 }
-                XmlEvent::End(e) if e.name().as_ref() == element.as_bytes() => {
+                XmlEvent::End(e) if e.name().as_ref() == element => {
                     return Ok(false) // End of the current element is reached, so we can return false 
                 }
                 XmlEvent::Start(e) if e.name().as_ref() == b"info" => {
@@ -127,6 +128,7 @@ pub mod xml_engine {
                     // I think this is what this does
                     return subnode_exists(path, reader, element, name, value)
                 }
+                XmlEvent::Start(e) if e.name().as_ref() == b"directory" => break,
                 XmlEvent::End(e) if e.name().as_ref() == b"registry" => break,
                 XmlEvent::Eof => break,
                 _ => (),
@@ -136,9 +138,88 @@ pub mod xml_engine {
         Ok(false)
     }
 
-    /// Read through event and directory nodes in the registry. Calls this function
-    /// recursively if it finds a directory entry
-    fn read_registry_nodes(reader: &mut XmlReader<BufReader<File>>) -> Result<Option<Vec<u16>>, quick_xml::Error> {
+    fn search_registry_for_subnode(path: &PathBuf, reader: &mut XmlReader<BufReader<File>>, name: &String, value: &String) -> Result<Vec<Range<usize>>, quick_xml::Error> {
+        let mut buf: Vec<u8> = Vec::new();
+        let mut node_state: Vec<String> = Vec::new();
+        let mut node_state_pos: Vec<usize> = Vec::new();
+        let mut ranges: Vec<Range<usize>> = Vec::new();
+
+        let mut found: bool = false;
+
+        loop {
+            match reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == name.as_bytes() => {
+                    let mut text = String::new();
+                    let mut txt_buf: Vec<u8> = Vec::new();
+                    let text_range = reader.read_to_end_into(e.to_end().name(), &mut txt_buf)?;
+                    get_partial_document(&path, text_range)?.read_to_string(&mut text)?;
+
+                    if &text.trim().to_string().to_lowercase() == &value.to_lowercase() {
+                        found = true;
+                    }
+                }
+                XmlEvent::Start(e) => if !found && (e.name().as_ref() == b"directory" || e.name().as_ref() == b"entry") {
+                    node_state.push(str::from_utf8(e.name().as_ref()).unwrap().to_string());
+                    node_state_pos.push(reader.buffer_position());
+                }
+                XmlEvent::End(e) if !node_state.is_empty() && found && e.name().as_ref() == node_state.last().unwrap().as_bytes() => {
+                    ranges.push(Range {start: *node_state_pos.last().unwrap(), end: reader.buffer_position()-1}); // Don't even question
+                    found = false;
+                    node_state.pop();
+                    node_state_pos.pop();
+                }
+                XmlEvent::End(e) if !node_state.is_empty() && !found  && e.name().as_ref() == node_state.last().unwrap().as_bytes() => {
+                    node_state.pop();
+                    node_state_pos.pop();
+                }
+                //XmlEvent::End(e) if e.name().as_ref() == b"directory" => break,
+                XmlEvent::End(e) if e.name().as_ref() == b"registry" => break,
+                XmlEvent::Eof => break,
+                _ => (),
+            }
+        }
+
+        Ok(ranges)
+    }
+
+    /// Read through the registry to find Nodes with the matching subnode.
+    fn read_registry_nodes_for_subnodes(path: &PathBuf, reader: &mut XmlReader<BufReader<File>>, name: &String, value: &String) -> Result<Vec<Range<usize>>, quick_xml::Error> {
+        let mut buf: Vec<u8> = Vec::new();
+        let mut ranges: Vec<Range<usize>> = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == b"entry" => {
+                    let start = reader.buffer_position();
+                    if subnode_exists(path, reader, e.name().as_ref(), &name, &value)? {
+                        let mut node_buf: Vec<u8> = Vec::new();
+                        let mut node_range = reader.read_to_end_into(e.to_end().name(), &mut node_buf)?;
+                        node_range.start = start;
+                        ranges.push(node_range);
+                    }
+                }
+                XmlEvent::Start(e) if e.name().as_ref() == b"directory" => {
+                    let start = reader.buffer_position();
+                    if subnode_exists(path, reader, e.name().as_ref(), &name, &value)? {
+                        let mut node_buf: Vec<u8> = Vec::new();
+                        let mut node_range = reader.read_to_end_into(e.to_end().name(), &mut node_buf)?;
+                        node_range.start = start;
+                        ranges.push(node_range);
+                    }
+                    ranges.extend(read_registry_nodes_for_subnodes(path, reader, &name, &value)?);
+                }
+                XmlEvent::End(e) if e.name().as_ref() == b"directory" => break,
+                XmlEvent::End(e) if e.name().as_ref() == b"registry" => break,
+                XmlEvent::Eof => break,
+                _ => (),
+            }
+        }
+        Ok(ranges)
+    }
+
+    /// Read through event and directory nodes in the registry to find it's ids.
+    /// Calls this function recursively if it finds a directory entry
+    fn read_registry_nodes_for_ids(reader: &mut XmlReader<BufReader<File>>) -> Result<Option<Vec<u16>>, quick_xml::Error> {
         //let xml_reader = XmlReader::from_reader(reader);
         let mut buf: Vec<u8> = Vec::new();
         let mut ids: Vec<u16> = Vec::new();
@@ -155,7 +236,7 @@ pub mod xml_engine {
                 XmlEvent::Start(e) if e.name().as_ref() == b"directory" => {
                     if let Some(id) = get_id_attribute(&reader, e)? {
                         ids.push(id);
-                        if let Some(contained_ids) = read_registry_nodes(reader)? {
+                        if let Some(contained_ids) = read_registry_nodes_for_ids(reader)? {
                             ids.extend(contained_ids);
                         } else {
                             return Ok(None)
@@ -283,6 +364,28 @@ pub mod xml_engine {
     }
 
     pub fn filter_subnode(path: &PathBuf, name: String, value: String) -> Result<Vec<Take<File>>, quick_xml::Error> {
+        let mut xml_reader = XmlReader::from_file(path)?;
+        let mut buf: Vec<u8> = Vec::new();
+        loop {
+            match xml_reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
+                    return Ok(
+                        search_registry_for_subnode(path, &mut xml_reader, &name, &value)?
+                        /*.into_iter().filter_map(|e| {
+                            get_partial_document(path, e).ok()
+                        }).collect());*/
+                        .into_iter().filter_map(|e| {
+                            extend_partial_to_full_node(path, e).ok()
+                        }).filter_map(|e| {
+                            get_partial_document(path, e).ok()
+                        }).collect());
+                        
+                }
+                XmlEvent::Eof => break,
+                _ => (),
+
+            }
+        }
         return Ok(Vec::new())
     }
 
@@ -302,7 +405,6 @@ pub mod xml_engine {
                         return Ok(Vec::new());
                     }
                 },
-                XmlEvent::Start(_e) => {},
                 XmlEvent::Eof => break,
                 _ => (),
             }
@@ -319,7 +421,7 @@ pub mod xml_engine {
         loop {
             match xml_reader.read_event_into(&mut buf)? {
                 XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
-                    if let Some(res) = read_registry_nodes(&mut xml_reader)? {
+                    if let Some(res) = read_registry_nodes_for_ids(&mut xml_reader)? {
                         ids.extend(res);
                     }
                     ids.sort_unstable(); // unstable is faster and lighter on memory says the documentation
@@ -344,7 +446,7 @@ pub mod xml_engine {
                 XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
                     // Traverse through the registry
                     registry_count += 1;
-                    if let Some(res) = read_registry_nodes(&mut xml_reader)? {
+                    if let Some(res) = read_registry_nodes_for_ids(&mut xml_reader)? {
                         ids.extend(res);
                     } else {
                         return Ok(false)
@@ -374,6 +476,13 @@ pub mod xml_engine {
         use quick_xml;
         use std::{path::PathBuf, io::Read};
         use tokio;
+        use std::fs::File;
+        use std::io::Take;
+
+        /// Removes double, triple, etc. whitespaces from strings
+        fn remove_whitespaces(a: String) -> String {
+            a.split_whitespace().filter(|e| !e.is_empty()).collect::<Vec<&str>>().join(" ")
+        }
 
         /// Verifies that all xml documents are accepted or rejected as they should
         #[tokio::test]
@@ -412,6 +521,83 @@ pub mod xml_engine {
                 xml_engine::collect_all_ids(&PathBuf::from("./tests/documents/valid_2.xml"))?,
                 vec![12845, 22222, 22223, 43362, 46233]
             );
+            Ok(())
+        }
+
+        #[test]
+        fn test_filtering_small() -> Result <(), quick_xml::Error> {
+            let mut result: String = String::new();
+            let mut takes = xml_engine::filter_subnode(
+                &PathBuf::from("./tests/documents/valid_1.xml"),
+                "name".to_string(),
+                "Element 1".to_string()
+            )?;
+            takes.iter_mut().for_each(|take: &mut Take<File>| {
+                let mut part: String = "".to_string();
+                match take.read_to_string(&mut part) {
+                    Ok(_) => {result.push_str(&part)},
+                    Err(_) => {}
+                };
+            });
+
+            assert_eq!(
+                remove_whitespaces(result),
+                remove_whitespaces("<entry id=\"12845\">
+                    <type>ToDo</type>
+                    <name>Element 1</name>
+                    <description>Lorem ipsum dolor sit amet</description>
+                    <due>1676134800</due>
+                    <note>pick</note>
+                    </entry>".to_string())
+            );
+
+            Ok(())
+        }
+        
+        /// Verifies that things can be filtered
+        #[test]
+        fn test_filtering_large() -> Result <(), quick_xml::Error> {
+            let mut result: String = String::new();
+            let mut takes = xml_engine::filter_subnode(
+                &PathBuf::from("./tests/documents/valid_1.xml"),
+                "note".to_string(),
+                "pick".to_string()
+            )?;
+            takes.iter_mut().for_each(|take: &mut Take<File>| {
+                let mut part: String = "".to_string();
+                match take.read_to_string(&mut part) {
+                    Ok(_) => {result.push_str(&part)},
+                    Err(_) => {}
+                };
+            });
+
+            assert_eq!(
+                remove_whitespaces(result),
+                remove_whitespaces("<entry id=\"12845\">
+                    <type>ToDo</type>
+                    <name>Element 1</name>
+                    <description>Lorem ipsum dolor sit amet</description>
+                    <due>1676134800</due>
+                    <note>pick</note>
+                    </entry><directory id=\"22223\">
+                    <info>
+                    <note>pick</note>
+                    </info>
+                    <entry id=\"43363\">
+                    <type>ToDo</type>
+                    <name>Element 4</name>
+                    <description>Lorem ipsum dolor sit amet</description>
+                    <due>1676134800</due>
+                    </entry>
+                    <entry id=\"5\">
+                    <type>ToDo</type>
+                    <name>Element 4</name>
+                    <description>Lorem ipsum dolor sit amet</description>
+                    <due>1676134800</due>
+                    </entry>
+                    </directory>".to_string())
+            );
+
             Ok(())
         }
 
