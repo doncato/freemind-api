@@ -94,7 +94,7 @@ pub mod request_handler {
 
                 log::debug!("Got a request to get by id");
 
-                if let Ok(mut content_part) = xml_engine::get_node_by_id(&path, queried_id).await {
+                if let Ok(mut content_part) = xml_engine::get_node_by_id(&path, queried_id) {
                     if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
                         let time = Utc::now().to_rfc2822().replace("+0000", "GMT");
                         return Ok(
@@ -180,7 +180,7 @@ pub mod request_handler {
             let mut response = HttpResponse::Ok().body("Success");
             
             log::debug!("Validating temporary file");
-            if let Ok(valid) = xml_engine::validate_xml_payload(&path).await { // Validate the xml document lying under the temporary path
+            if let Ok(valid) = xml_engine::validate_xml_payload(&path) { // Validate the xml document lying under the temporary path
                 if valid {
                     log::debug!("Submitted File valid! Copying temporary file in final place..."); 
                     fs::copy(&path, &final_path)?; //When the file is valid copy the temporary file to the final location
@@ -213,7 +213,7 @@ pub mod request_handler {
             let mut response = HttpResponse::Ok().body("Success");
             
             log::debug!("Validating temporary file");
-            if let Ok(valid) = xml_engine::validate_xml_payload(&path).await { // Validate the xml document lying under the temporary path and return according status codes
+            if let Ok(valid) = xml_engine::validate_xml_payload(&path) { // Validate the xml document lying under the temporary path and return according status codes
                 if valid {
                     log::debug!("File passed validation returning success.");
                 } else {
