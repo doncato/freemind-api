@@ -106,7 +106,7 @@ pub mod xml_engine {
     }
 
     /// Traverses through the registry to find all entries or directories which have a subnode (or even sub-subnode etc.)
-    /// with matching name and value.
+    /// with matching name and value. As value '*' can also be used to match any values
     fn search_registry_for_subnode(path: &PathBuf, reader: &mut XmlReader<BufReader<File>>, name: &String, value: &String) -> Result<Vec<Range<usize>>, quick_xml::Error> {
         let mut buf: Vec<u8> = Vec::new();
         let mut node_state: Vec<String> = Vec::new();
@@ -123,7 +123,7 @@ pub mod xml_engine {
                     let text_range = reader.read_to_end_into(e.to_end().name(), &mut txt_buf)?;
                     get_partial_document(&path, text_range)?.read_to_string(&mut text)?;
 
-                    if &text.trim().to_string().to_lowercase() == &value.to_lowercase() {
+                    if &value == &"*" || &text.trim().to_string().to_lowercase() == &value.to_lowercase() {
                         found = true;
                     }
                 }
@@ -297,6 +297,8 @@ pub mod xml_engine {
         return Ok(result)
     }
 
+    /// Filters the document for any Entry/Directory Nodes which subnodes (or even sub-subnodes)
+    /// match the requested name and value
     pub fn filter_subnode(path: &PathBuf, name: String, value: String) -> Result<Vec<Take<File>>, quick_xml::Error> {
         let mut xml_reader = XmlReader::from_file(path)?;
         let mut buf: Vec<u8> = Vec::new();

@@ -18,6 +18,10 @@ pub mod request_handler {
     use tokio::io::AsyncWriteExt;
     use tokio::fs::File as TokioFile;
 
+    // Constants for some return messages
+    const MSG_AUTH_ERROR: &str = "Provided Credentials Invalid or Missing";
+    const MSG_INTERNAL_ERROR: &str = "Internal Error";
+
     /// Verify any Incoming Requests
     /// 
     /// Look for provided headers as authentication and check the values against
@@ -81,6 +85,46 @@ pub mod request_handler {
         Ok(())
     }
 
+    /// Builds an Actix HttpResponse representing an xml document with the given content
+    /// as context
+    fn build_xml_response_from_string(content: String) -> HttpResponse {
+        let time: String = Utc::now().to_rfc2822().replace("+0000", "GMT");
+        return {
+            HttpResponse::build(StatusCode::OK)
+                .content_type(ContentType::xml())
+                .insert_header(("content-disposition", "attachment"))
+                .insert_header(("last-modified", time))
+                .body(content)
+        }
+    }
+
+    /// Endpoint for filtering a posts by matching Name and Value of subnodes with the provided Name and Value
+    #[post(r"/xml/filter/{name}/{value}")]
+    async fn post_xml_filter(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let query_name: String = req.match_info().get("id").unwrap_or("").parse().unwrap_or("".to_string());
+            let query_value: String = req.match_info().get("id").unwrap_or("").parse().unwrap_or("".to_string());
+            if query_name == "" || query_value == "" {
+                return Ok(HttpResponse::BadRequest().body("Queried Name and/or Value is/are invalid"));
+            } else {
+                let mut path: std::path::PathBuf = state.user_files_path.clone();
+                path.push(format!("{}.xml", user));
+
+                log::debug!("Got a request to filter the document");
+
+                if let Ok(mut content_part) = xml_engine::filter_subnode(&path, query_name, query_value) {
+                    if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
+                        return Ok(build_xml_response_from_string(response))
+                    }
+                }
+
+                return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
+            }
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR));
+        }
+    }
+
     /// Endpoint for getting an Element by ID
     #[post(r"/xml/get_by_id/{id}")]
     async fn post_xml_get_by_id(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
@@ -96,23 +140,16 @@ pub mod request_handler {
 
                 if let Ok(mut content_part) = xml_engine::get_node_by_id(&path, queried_id) {
                     if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
-                        let time = Utc::now().to_rfc2822().replace("+0000", "GMT");
-                        return Ok(
-                            HttpResponse::build(StatusCode::OK)
-                                .content_type(ContentType::xml())
-                                .insert_header(("content-disposition", "attachment"))
-                                .insert_header(("last-modified", time))
-                                .body(response)
-                        )
+                        return Ok(build_xml_response_from_string(response))
                     } else {
-                        return Ok(HttpResponse::InternalServerError().body("500 - Internal Server Error"))    
+                        return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))    
                     }
                 } else {
-                    return Ok(HttpResponse::InternalServerError().body("500 - Internal Server Error"))
+                    return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
                 }
             }
         } else {
-            return Ok(HttpResponse::Unauthorized().body("Provided Credentials Invalid or Missing")); 
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR)); 
         }
     }
 
@@ -159,7 +196,7 @@ pub mod request_handler {
 
             }
         } else {
-            return Ok(HttpResponse::Unauthorized().body("Provided Credentials Invalid or Missing")); 
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR)); 
         }
 
     }
@@ -189,13 +226,13 @@ pub mod request_handler {
                     response = HttpResponse::BadRequest().body("Provided XML Document is invalid"); // When the file is invalid return an error
                 }
             } else {
-                response = HttpResponse::InternalServerError().body("500 - Internal Server Error");
+                response = HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR);
             };
             log::debug!("Deleting temporary file");
             fs::remove_file(&path)?; // Finally delete the temporary file
             return Ok(response)
         } else {
-            return Ok(HttpResponse::Unauthorized().body("Provided Credentials Invalid or Missing")); 
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR)); 
         }
     }
 
@@ -221,13 +258,13 @@ pub mod request_handler {
                     response = HttpResponse::BadRequest().body("Provided XML Document is invalid");
                 }
             } else {
-                response = HttpResponse::InternalServerError().body("500 - Internal Server Error");
+                response = HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR);
             };
             log::debug!("Deleting temporary file");
             fs::remove_file(&path)?; // Delete the temporary file
             return Ok(response)
         } else {
-            return Ok(HttpResponse::Unauthorized().body("Provided Credentials Invalid or Missing")); 
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR)); 
         }
     }
 
@@ -240,6 +277,7 @@ pub mod request_handler {
             App::new()
                 .app_data(web::Data::new(state.clone())) // Clone the AppState for each worker
                 .app_data(web::PayloadConfig::new(state.max_payload_size as usize).mimetype(mime::TEXT_XML)) // Only accept text/xml bodies // Maybe the Mimetype should not be restricted like that as JSON could also be accepted some day
+                .service(post_xml_filter)
                 .service(post_xml_get_by_id)
                 .service(post_xml_fetch)
                 .service(post_xml_update)
