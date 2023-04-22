@@ -9,6 +9,7 @@ pub mod request_handler {
     use crate::data::data_types::AppState;
     use crate::data::mysql_handler;
     use crate::data::xml_engine;
+    use core::ops::Range;
     use chrono::prelude::*;
     use mime;
     use log;
@@ -98,7 +99,87 @@ pub mod request_handler {
         }
     }
 
-    /// Endpoint for filtering a posts by matching Name and Value of subnodes with the provided Name and Value
+    /// Gets all elements which due falls into the between range
+    fn post_xml_due(state: web::Data<AppState>, user: &str, between: Range<u32>) -> Result<HttpResponse> {
+        let mut path: std::path::PathBuf = state.user_files_path.clone();
+        path.push(format!("{}.xml", user));
+
+        if let Ok(mut content_part) = xml_engine::filter_by_due(&path, between) {
+            if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
+                return Ok(build_xml_response_from_string(response))
+            }
+        }
+
+        return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
+    }
+
+    /// Endpoint for filtering all elements due tomorrow by matching their due date
+    #[post(r"/xml/due/tomorrow")]
+    async fn post_xml_due_tomorrow(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let date = chrono::Utc::now().date_naive() + chrono::Days::new(1);
+
+            let start_dt: u32 = chrono::NaiveDateTime::new(
+                date, chrono::NaiveTime::from_hms_milli_opt(0,0,0,0).unwrap()
+            ).timestamp().try_into().unwrap();
+            let end_dt: u32 = chrono::NaiveDateTime::new(
+                date, chrono::NaiveTime::from_hms_milli_opt(23,59,59,999).unwrap()
+            ).timestamp().try_into().unwrap();
+
+            let range: Range<u32> = Range {
+                start: start_dt,
+                end: end_dt,
+            };
+            return post_xml_due(state, user, range);
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR));
+        }
+    }
+
+    /// Endpoint for filtering all elements due today by matching their due date
+    #[post(r"/xml/due/today")]
+    async fn post_xml_due_today(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let date = chrono::Utc::now().date_naive();
+
+            let start_dt: u32 = chrono::NaiveDateTime::new(
+                date, chrono::NaiveTime::from_hms_milli_opt(0,0,0,0).unwrap()
+            ).timestamp().try_into().unwrap();
+            let end_dt: u32 = chrono::NaiveDateTime::new(
+                date, chrono::NaiveTime::from_hms_milli_opt(23,59,59,999).unwrap()
+            ).timestamp().try_into().unwrap();
+
+            let range: Range<u32> = Range {
+                start: start_dt,
+                end: end_dt,
+            };
+            return post_xml_due(state, user, range);
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR));
+        }
+    }
+
+    /// Endpoint for filtering all elements due in the past by matching their due date
+    #[post(r"/xml/due/over")]
+    async fn post_xml_due_over(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let date = chrono::Utc::now().date_naive() - chrono::Days::new(1);
+
+            let end_dt: u32 = chrono::NaiveDateTime::new(
+                date, chrono::NaiveTime::from_hms_milli_opt(23,59,59,999).unwrap()
+            ).timestamp().try_into().unwrap();
+
+            let range: Range<u32> = Range {
+                start: 0,
+                end: end_dt,
+            };
+            return post_xml_due(state, user, range);
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR));
+        }
+    }
+
+    /// Endpoint for filtering all elements by matching Name and Value of subnodes with the provided Name and Value
     #[post(r"/xml/filter/{name}/{value}")]
     async fn post_xml_filter(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
         if let Some(user) = verify_request(&req, &state).await {
@@ -277,6 +358,9 @@ pub mod request_handler {
             App::new()
                 .app_data(web::Data::new(state.clone())) // Clone the AppState for each worker
                 .app_data(web::PayloadConfig::new(state.max_payload_size as usize).mimetype(mime::TEXT_XML)) // Only accept text/xml bodies // Maybe the Mimetype should not be restricted like that as JSON could also be accepted some day
+                .service(post_xml_due_tomorrow)
+                .service(post_xml_due_today)
+                .service(post_xml_due_over)
                 .service(post_xml_filter)
                 .service(post_xml_get_by_id)
                 .service(post_xml_fetch)

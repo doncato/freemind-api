@@ -107,13 +107,17 @@ pub mod xml_engine {
 
     /// Traverses through the registry to find all entries or directories which have a subnode (or even sub-subnode etc.)
     /// with matching name and value. As value '*' can also be used to match any values
-    fn search_registry_for_subnode(path: &PathBuf, reader: &mut XmlReader<BufReader<File>>, name: &String, value: &String) -> Result<Vec<Range<usize>>, quick_xml::Error> {
+    /// Returns two vecs: The first contains the ranges of the nodes, the second one is a vec containing the values of the searched subnodes (order should corresponds
+    /// to the one of the first vec)
+    fn search_registry_for_subnode(path: &PathBuf, reader: &mut XmlReader<BufReader<File>>, name: &String, value: &String) -> Result<(Vec<Range<usize>>, Vec<String>), quick_xml::Error> {
         let mut buf: Vec<u8> = Vec::new();
         let mut node_state: Vec<String> = Vec::new();
         let mut node_state_pos: Vec<usize> = Vec::new();
+        let mut values: Vec<String> = Vec::new();
         let mut ranges: Vec<Range<usize>> = Vec::new();
 
         let mut found: bool = false;
+        let mut saved_value: String = String::new();
 
         loop {
             match reader.read_event_into(&mut buf)? {
@@ -124,6 +128,7 @@ pub mod xml_engine {
                     get_partial_document(&path, text_range)?.read_to_string(&mut text)?;
 
                     if &value == &"*" || &text.trim().to_string().to_lowercase() == &value.to_lowercase() {
+                        saved_value = text.trim().to_string();
                         found = true;
                     }
                 }
@@ -132,7 +137,10 @@ pub mod xml_engine {
                     node_state_pos.push(reader.buffer_position());
                 }
                 XmlEvent::End(e) if !node_state.is_empty() && found && e.name().as_ref() == node_state.last().unwrap().as_bytes() => {
+                    values.push(saved_value.clone());
                     ranges.push(Range {start: *node_state_pos.last().unwrap(), end: reader.buffer_position()-1}); // Don't even question
+
+                    saved_value = String::new();
                     found = false;
                     node_state.pop();
                     node_state_pos.pop();
@@ -148,7 +156,7 @@ pub mod xml_engine {
             }
         }
 
-        Ok(ranges)
+        Ok((ranges, values))
     }
 
     /// Read through event and directory nodes in the registry to find it's ids.
@@ -297,6 +305,48 @@ pub mod xml_engine {
         return Ok(result)
     }
 
+    /// Filters the document using the due node. Only elements with the due
+    /// subnode set which value falls in the specified range is returned
+    pub fn filter_by_due(path: &PathBuf, in_between: Range<u32>) -> Result<Vec<Take<File>>, quick_xml::Error> {
+        let mut xml_reader = XmlReader::from_file(path)?;
+        let mut buf: Vec<u8> = Vec::new();
+        loop {
+            match xml_reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
+                    let mut final_take: Vec<Take<File>> = Vec::new();
+                    let (f_1, f_2) = search_registry_for_subnode(path, &mut xml_reader, &"due".to_string(), &"*".to_string())?;
+                    if f_1.len() != f_2.len() {
+                        break // Todo: Better error handling here
+                    }
+                    let mut fi_1 = f_1.into_iter();
+                    let mut fi_2 = f_2.into_iter();
+
+                    loop {
+                        let this_1 = fi_1.next();
+                        let this_2 = fi_2.next();
+                        if this_1.is_none() || this_2.is_none() {
+                            break
+                        }
+                        let this_1 = this_1.unwrap();
+                        let this_2 = this_2.unwrap();
+                        let time = this_2.parse::<u32>().unwrap_or(0); // Fixme it is dumb to use 0 instead here, I need to implement a new error ig
+                        if time > in_between.start && time < in_between.end {
+                            final_take.push(
+                                get_partial_document(
+                                    path, extend_partial_to_full_node(path, this_1)?
+                                )?
+                            );
+                        }
+                    }
+                    return Ok(final_take)
+                }
+                XmlEvent::Eof => break,
+                _ => (),
+            }
+        }
+        return Ok(Vec::new())
+    }
+
     /// Filters the document for any Entry/Directory Nodes which subnodes (or even sub-subnodes)
     /// match the requested name and value
     pub fn filter_subnode(path: &PathBuf, name: String, value: String) -> Result<Vec<Take<File>>, quick_xml::Error> {
@@ -306,7 +356,7 @@ pub mod xml_engine {
             match xml_reader.read_event_into(&mut buf)? {
                 XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
                     return Ok(
-                        search_registry_for_subnode(path, &mut xml_reader, &name, &value)?
+                        search_registry_for_subnode(path, &mut xml_reader, &name, &value)?.0
                         .into_iter().filter_map(|e| {
                             extend_partial_to_full_node(path, e).ok()
                         }).filter_map(|e| {
