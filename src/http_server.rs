@@ -179,12 +179,39 @@ pub mod request_handler {
         }
     }
 
+    /// Endpoint for filtering all elements due in the specified frame by matching their due date
+    #[post(r"/xml/due/in/{start}/{end}")]
+    async fn post_xml_due_within(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let start_dt: u32 = match req.match_info().get("start").unwrap_or(".").parse() {
+                Ok(val) => val,
+                Err(_) => return Ok(HttpResponse::BadRequest().body("Supplied Start value is invalid"))
+            };
+            let mut end_dt: u32 = match req.match_info().get("end").unwrap_or(".").parse() {
+                Ok(val) => val,
+                Err(_) => return Ok(HttpResponse::BadRequest().body("Supplied End value is invalid"))
+            };
+
+            if end_dt == 0 {
+                end_dt = u32::MAX;
+            }
+            
+            let range: Range<u32> = Range {
+                start: start_dt,
+                end: end_dt,
+            };
+            return post_xml_due(state, user, range);
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR));
+        }
+    }
+
     /// Endpoint for filtering all elements by matching Name and Value of subnodes with the provided Name and Value
     #[post(r"/xml/filter/{name}/{value}")]
     async fn post_xml_filter(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
         if let Some(user) = verify_request(&req, &state).await {
-            let query_name: String = req.match_info().get("id").unwrap_or("").parse().unwrap_or("".to_string());
-            let query_value: String = req.match_info().get("id").unwrap_or("").parse().unwrap_or("".to_string());
+            let query_name: String = req.match_info().get("name").unwrap_or("").parse().unwrap_or("".to_string());
+            let query_value: String = req.match_info().get("value").unwrap_or("").parse().unwrap_or("".to_string());
             if query_name == "" || query_value == "" {
                 return Ok(HttpResponse::BadRequest().body("Queried Name and/or Value is/are invalid"));
             } else {
@@ -361,6 +388,7 @@ pub mod request_handler {
                 .service(post_xml_due_tomorrow)
                 .service(post_xml_due_today)
                 .service(post_xml_due_over)
+                .service(post_xml_due_within)
                 .service(post_xml_filter)
                 .service(post_xml_get_by_id)
                 .service(post_xml_fetch)

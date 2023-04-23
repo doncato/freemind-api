@@ -455,6 +455,7 @@ pub mod xml_engine {
 
     #[cfg(test)]
     mod tests {
+        use core::ops::Range;
         use crate::data::xml_engine;
         use quick_xml;
         use std::{path::PathBuf, io::Read};
@@ -464,6 +465,59 @@ pub mod xml_engine {
         /// Removes double, triple, etc. whitespaces from strings
         fn remove_whitespaces(a: String) -> String {
             a.split_whitespace().filter(|e| !e.is_empty()).collect::<Vec<&str>>().join(" ")
+        }
+
+        /// Verifies Due filtering works
+        #[test]
+        fn test_due_filtering() -> Result<(), quick_xml::Error> {
+            let mut result: String = String::new();
+            let mut takes = xml_engine::filter_by_due(&PathBuf::from("./tests/documents/valid_2.xml"), Range {start: 1676134850, end: 1676134950})?;
+            takes.iter_mut().for_each(|take: &mut Take<File>| {
+                let mut part: String = "".to_string();
+                match take.read_to_string(&mut part) {
+                    Ok(_) => {result.push_str(&part)},
+                    Err(_) => {}
+                };
+            });
+
+            assert_eq!(
+                remove_whitespaces(result),
+                remove_whitespaces("<entry id=\"12845\">
+                    <type>ToDo</type>
+                    <name>Element 1</name>
+                    <description>Lorem ipsum dolor sit amet</description>
+                    <due>1676134900</due>
+                    </entry>".to_string()
+                )
+            );
+
+            let mut result: String = String::new();
+            let mut takes = xml_engine::filter_by_due(&PathBuf::from("./tests/documents/valid_2.xml"), Range {start: 1676134750, end: 1676134950})?;
+            takes.iter_mut().for_each(|take: &mut Take<File>| {
+                let mut part: String = "".to_string();
+                match take.read_to_string(&mut part) {
+                    Ok(_) => {result.push_str(&part)},
+                    Err(_) => {}
+                };
+            });
+
+            assert_eq!(
+                remove_whitespaces(result),
+                remove_whitespaces("<entry id=\"12845\">
+                    <type>ToDo</type>
+                    <name>Element 1</name>
+                    <description>Lorem ipsum dolor sit amet</description>
+                    <due>1676134900</due>
+                    </entry><entry id=\"46233\">
+                    <type>ToDo</type>
+                    <name>Element 3</name>
+                    <description>Lorem ipsum dolor sit amet</description>
+                    <due>1676134800</due>
+                    </entry>".to_string()
+                )
+            );
+
+            Ok(())
         }
 
         /// Verifies that all xml documents are accepted or rejected as they should

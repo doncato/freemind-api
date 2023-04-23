@@ -50,15 +50,16 @@ bcrypt hash in the database
 - `/xml/fetch` To fetch the whole XML document.
 - `/xml/update` To update the whole XML document.
 - `/xml/validate` To validate a XML document but not actually perform any changes.
+- `/xml/due/over` To get only nodes wich were due in the past.
+- `/xml/due/today` To get only nodes wich are due or on today.
+- `/xml/due/tomorrow` To get only nodes which are due or on tomorrow.
+- `/xml/due/in/{start}/{end}` To get only nodes which due date is in between start and end
 
 ### Planned
 - `/act/delete_past` To delete nodes which are expired
 - `/act/delete_past/TIMESTAMP` To delete nodes which are expired after TIMESTAMP
 - `/xml/get_next_due` To get the next due node
 - `/act/get_next_priority` To get the next node with the highest priority.
-- `/xml/due/over` To get only nodes wich were due in the past.
-- `/xml/due/today` To get only nodes wich are due or on today.
-- `/xml/due/tomorrow` To get only nodes which are due or on tomorrow.
 - `/json/fetch` To fetch the whole XML document but returned as JSON.
 - `/json/sort_by/due` To get the nodes as json sorted by due
 - `/json/sort_by/priority` To get the nodes as json sorted by priority
