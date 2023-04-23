@@ -3,6 +3,7 @@ This is the Api server of the Freemind project.
 
 ## TODOs
 - Add more endpoints
+- Test the new endpoints
 - Use user ID's instead of names as the primary key for stuff
     - Not much needed really:
     - The two Validate functions of the sql mod need to return the id instead of the name
@@ -59,7 +60,7 @@ bcrypt hash in the database
 - `/act/delete_past` To delete nodes which are expired
 - `/act/delete_past/TIMESTAMP` To delete nodes which are expired after TIMESTAMP
 - `/xml/get_next_due` To get the next due node
-- `/act/get_next_priority` To get the next node with the highest priority.
+- `/xml/get_next_priority` To get the next node with the highest priority.
 - `/json/fetch` To fetch the whole XML document but returned as JSON.
 - `/json/sort_by/due` To get the nodes as json sorted by due
 - `/json/sort_by/priority` To get the nodes as json sorted by priority

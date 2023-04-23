@@ -305,6 +305,93 @@ pub mod xml_engine {
         return Ok(result)
     }
 
+    /// Gets all elements with the highest priority (lowest value)
+    pub fn get_highest_priority(path: &PathBuf) -> Result<Vec<Take<File>>, quick_xml::Error> {
+        let mut xml_reader = XmlReader::from_file(path)?;
+        let mut buf: Vec<u8> = Vec::new();
+        loop {
+            match xml_reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
+                    let mut final_take: Vec<Take<File>> = Vec::new();
+                    let (f_1, f_2) = search_registry_for_subnode(path, &mut xml_reader, &"due".to_string(), &"*".to_string())?;
+                    if f_1.len() != f_2.len() {
+                        break // Todo: Better error handling here
+                    }
+                    let mut fi_1 = f_1.into_iter();
+                    let mut fi_2 = f_2.into_iter();
+
+                    let min_priority: u16 = match fi_2.clone().min() {
+                        Some(val) => val.parse::<u16>().unwrap_or(0), // Fixme better error handling
+                        None => break // Array empty
+                    };
+
+                    loop {
+                        let this_1 = fi_1.next();
+                        let this_2 = fi_2.next();
+                        if this_1.is_none() || this_2.is_none() {
+                            break
+                        }
+                        let this_1 = this_1.unwrap();
+                        let this_2 = this_2.unwrap();
+                        let prio = this_2.parse::<u16>().unwrap_or(0); // Fixme it is dumb to use 0 instead here, I need to implement a new error ig
+                        if prio < min_priority {
+                            final_take.push(
+                                get_partial_document(
+                                    path, extend_partial_to_full_node(path, this_1)?
+                                )?
+                            );
+                        }
+                    }
+                    return Ok(final_take)
+                }
+                XmlEvent::Eof => break,
+                _ => (),
+            }
+        }
+        return Ok(Vec::new())
+    }
+
+    /// Gets all elements which priority is below the supplied threshold.
+    pub fn filter_by_priority(path: &PathBuf, priority_thresh: u16) -> Result<Vec<Take<File>>, quick_xml::Error> {
+        let mut xml_reader = XmlReader::from_file(path)?;
+        let mut buf: Vec<u8> = Vec::new();
+        loop {
+            match xml_reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
+                    let mut final_take: Vec<Take<File>> = Vec::new();
+                    let (f_1, f_2) = search_registry_for_subnode(path, &mut xml_reader, &"due".to_string(), &"*".to_string())?;
+                    if f_1.len() != f_2.len() {
+                        break // Todo: Better error handling here
+                    }
+                    let mut fi_1 = f_1.into_iter();
+                    let mut fi_2 = f_2.into_iter();
+
+                    loop {
+                        let this_1 = fi_1.next();
+                        let this_2 = fi_2.next();
+                        if this_1.is_none() || this_2.is_none() {
+                            break
+                        }
+                        let this_1 = this_1.unwrap();
+                        let this_2 = this_2.unwrap();
+                        let prio = this_2.parse::<u16>().unwrap_or(0); // Fixme it is dumb to use 0 instead here, I need to implement a new error ig
+                        if prio < priority_thresh {
+                            final_take.push(
+                                get_partial_document(
+                                    path, extend_partial_to_full_node(path, this_1)?
+                                )?
+                            );
+                        }
+                    }
+                    return Ok(final_take)
+                }
+                XmlEvent::Eof => break,
+                _ => (),
+            }
+        }
+        return Ok(Vec::new())
+    }
+
     /// Filters the document using the due node. Only elements with the due
     /// subnode set which value falls in the specified range is returned
     pub fn filter_by_due(path: &PathBuf, in_between: Range<u32>) -> Result<Vec<Take<File>>, quick_xml::Error> {

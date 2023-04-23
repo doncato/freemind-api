@@ -113,6 +113,47 @@ pub mod request_handler {
         return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
     }
 
+    #[post(r"/xml/priority/highest")]
+    async fn post_xml_priority_highest(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let mut path: std::path::PathBuf = state.user_files_path.clone();
+            path.push(format!("{}.xml", user));
+
+            if let Ok(mut content_part) = xml_engine::get_highest_priority(&path) {
+                if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
+                    return Ok(build_xml_response_from_string(response))
+                }
+            }
+
+            return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR))
+        }
+    }
+
+    #[post(r"/xml/priority/{priority}")]
+    async fn post_xml_priority_custom(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let priority: u16 = match req.match_info().get("priority").unwrap_or("").parse() {
+                Ok(val) => val,
+                Err(_) => return Ok(HttpResponse::BadRequest().body("Queried priority invalid"))
+            };
+
+            let mut path: std::path::PathBuf = state.user_files_path.clone();
+            path.push(format!("{}.xml", user));
+
+            if let Ok(mut content_part) = xml_engine::filter_by_priority(&path, priority) {
+                if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
+                    return Ok(build_xml_response_from_string(response))
+                }
+            }
+            
+            return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR))
+        }
+    }
+
     /// Endpoint for filtering all elements due tomorrow by matching their due date
     #[post(r"/xml/due/tomorrow")]
     async fn post_xml_due_tomorrow(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
@@ -385,6 +426,8 @@ pub mod request_handler {
             App::new()
                 .app_data(web::Data::new(state.clone())) // Clone the AppState for each worker
                 .app_data(web::PayloadConfig::new(state.max_payload_size as usize).mimetype(mime::TEXT_XML)) // Only accept text/xml bodies // Maybe the Mimetype should not be restricted like that as JSON could also be accepted some day
+                .service(post_xml_priority_highest)
+                .service(post_xml_priority_custom)
                 .service(post_xml_due_tomorrow)
                 .service(post_xml_due_today)
                 .service(post_xml_due_over)
