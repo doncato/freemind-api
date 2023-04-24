@@ -313,7 +313,7 @@ pub mod xml_engine {
             match xml_reader.read_event_into(&mut buf)? {
                 XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
                     let mut final_take: Vec<Take<File>> = Vec::new();
-                    let (f_1, f_2) = search_registry_for_subnode(path, &mut xml_reader, &"due".to_string(), &"*".to_string())?;
+                    let (f_1, f_2) = search_registry_for_subnode(path, &mut xml_reader, &"priority".to_string(), &"*".to_string())?;
                     if f_1.len() != f_2.len() {
                         break // Todo: Better error handling here
                     }
@@ -333,7 +333,10 @@ pub mod xml_engine {
                         }
                         let this_1 = this_1.unwrap();
                         let this_2 = this_2.unwrap();
-                        let prio = this_2.parse::<u16>().unwrap_or(0); // Fixme it is dumb to use 0 instead here, I need to implement a new error ig
+                        let prio = match this_2.parse::<u16>() {
+                            Ok(val) => val,
+                            Err(_) => continue,
+                        };
                         if prio < min_priority {
                             final_take.push(
                                 get_partial_document(
@@ -359,7 +362,7 @@ pub mod xml_engine {
             match xml_reader.read_event_into(&mut buf)? {
                 XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
                     let mut final_take: Vec<Take<File>> = Vec::new();
-                    let (f_1, f_2) = search_registry_for_subnode(path, &mut xml_reader, &"due".to_string(), &"*".to_string())?;
+                    let (f_1, f_2) = search_registry_for_subnode(path, &mut xml_reader, &"priority".to_string(), &"*".to_string())?;
                     if f_1.len() != f_2.len() {
                         break // Todo: Better error handling here
                     }
@@ -374,7 +377,10 @@ pub mod xml_engine {
                         }
                         let this_1 = this_1.unwrap();
                         let this_2 = this_2.unwrap();
-                        let prio = this_2.parse::<u16>().unwrap_or(0); // Fixme it is dumb to use 0 instead here, I need to implement a new error ig
+                        let prio = match this_2.parse::<u16>() {
+                            Ok(val) => val,
+                            Err(_) => continue,
+                        };
                         if prio < priority_thresh {
                             final_take.push(
                                 get_partial_document(
@@ -416,7 +422,10 @@ pub mod xml_engine {
                         }
                         let this_1 = this_1.unwrap();
                         let this_2 = this_2.unwrap();
-                        let time = this_2.parse::<u32>().unwrap_or(0); // Fixme it is dumb to use 0 instead here, I need to implement a new error ig
+                        let time = match this_2.parse::<u32>() {
+                            Ok(val) => val,
+                            Err(_) => continue,
+                        };
                         if time > in_between.start && time < in_between.end {
                             final_take.push(
                                 get_partial_document(
