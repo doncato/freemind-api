@@ -9,6 +9,7 @@ pub mod request_handler {
     use crate::data::data_types::AppState;
     use crate::data::mysql_handler;
     use crate::data::xml_engine;
+    use core::ops::Range;
     use chrono::prelude::*;
     use mime;
     use log;
@@ -17,6 +18,10 @@ pub mod request_handler {
     use std::fs;
     use tokio::io::AsyncWriteExt;
     use tokio::fs::File as TokioFile;
+
+    // Constants for some return messages
+    const MSG_AUTH_ERROR: &str = "Provided Credentials Invalid or Missing";
+    const MSG_INTERNAL_ERROR: &str = "Internal Error";
 
     /// Verify any Incoming Requests
     /// 
@@ -81,6 +86,194 @@ pub mod request_handler {
         Ok(())
     }
 
+    /// Builds an Actix HttpResponse representing an xml document with the given content
+    /// as context
+    fn build_xml_response_from_string(content: String) -> HttpResponse {
+        let time: String = Utc::now().to_rfc2822().replace("+0000", "GMT");
+        return {
+            HttpResponse::build(StatusCode::OK)
+                .content_type(ContentType::xml())
+                .insert_header(("content-disposition", "attachment"))
+                .insert_header(("last-modified", time))
+                .body(content)
+        }
+    }
+
+    /// Gets all elements which due falls into the between range
+    fn post_xml_due(state: web::Data<AppState>, user: &str, between: Range<u32>) -> Result<HttpResponse> {
+        let mut path: std::path::PathBuf = state.user_files_path.clone();
+        path.push(format!("{}.xml", user));
+
+        if let Ok(mut content_part) = xml_engine::filter_by_due(&path, between) {
+            if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
+                return Ok(build_xml_response_from_string(response))
+            }
+        }
+
+        return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
+    }
+
+    #[post(r"/xml/priority/highest")]
+    async fn post_xml_priority_highest(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let mut path: std::path::PathBuf = state.user_files_path.clone();
+            path.push(format!("{}.xml", user));
+
+            if let Ok(mut content_part) = xml_engine::get_highest_priority(&path) {
+                if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
+                    return Ok(build_xml_response_from_string(response))
+                }
+            }
+
+            return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR))
+        }
+    }
+
+    #[post(r"/xml/priority/{priority}")]
+    async fn post_xml_priority_custom(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let priority: u16 = match req.match_info().get("priority").unwrap_or("").parse() {
+                Ok(val) => val,
+                Err(_) => return Ok(HttpResponse::BadRequest().body("Queried priority invalid"))
+            };
+
+            let mut path: std::path::PathBuf = state.user_files_path.clone();
+            path.push(format!("{}.xml", user));
+
+            if let Ok(mut content_part) = xml_engine::filter_by_priority(&path, priority) {
+                if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
+                    return Ok(build_xml_response_from_string(response))
+                }
+            }
+            
+            return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR))
+        }
+    }
+
+    /// Endpoint for filtering all elements due tomorrow by matching their due date
+    #[post(r"/xml/due/tomorrow")]
+    async fn post_xml_due_tomorrow(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let date = chrono::Utc::now().date_naive() + chrono::Days::new(1);
+
+            let start_dt: u32 = chrono::NaiveDateTime::new(
+                date, chrono::NaiveTime::from_hms_milli_opt(0,0,0,0).unwrap()
+            ).timestamp().try_into().unwrap();
+            let end_dt: u32 = chrono::NaiveDateTime::new(
+                date, chrono::NaiveTime::from_hms_milli_opt(23,59,59,999).unwrap()
+            ).timestamp().try_into().unwrap();
+
+            let range: Range<u32> = Range {
+                start: start_dt,
+                end: end_dt,
+            };
+            return post_xml_due(state, user, range);
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR));
+        }
+    }
+
+    /// Endpoint for filtering all elements due today by matching their due date
+    #[post(r"/xml/due/today")]
+    async fn post_xml_due_today(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let date = chrono::Utc::now().date_naive();
+
+            let start_dt: u32 = chrono::NaiveDateTime::new(
+                date, chrono::NaiveTime::from_hms_milli_opt(0,0,0,0).unwrap()
+            ).timestamp().try_into().unwrap();
+            let end_dt: u32 = chrono::NaiveDateTime::new(
+                date, chrono::NaiveTime::from_hms_milli_opt(23,59,59,999).unwrap()
+            ).timestamp().try_into().unwrap();
+
+            let range: Range<u32> = Range {
+                start: start_dt,
+                end: end_dt,
+            };
+            return post_xml_due(state, user, range);
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR));
+        }
+    }
+
+    /// Endpoint for filtering all elements due in the past by matching their due date
+    #[post(r"/xml/due/over")]
+    async fn post_xml_due_over(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let date = chrono::Utc::now().date_naive() - chrono::Days::new(1);
+
+            let end_dt: u32 = chrono::NaiveDateTime::new(
+                date, chrono::NaiveTime::from_hms_milli_opt(23,59,59,999).unwrap()
+            ).timestamp().try_into().unwrap();
+
+            let range: Range<u32> = Range {
+                start: 0,
+                end: end_dt,
+            };
+            return post_xml_due(state, user, range);
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR));
+        }
+    }
+
+    /// Endpoint for filtering all elements due in the specified frame by matching their due date
+    #[post(r"/xml/due/in/{start}/{end}")]
+    async fn post_xml_due_within(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let start_dt: u32 = match req.match_info().get("start").unwrap_or(".").parse() {
+                Ok(val) => val,
+                Err(_) => return Ok(HttpResponse::BadRequest().body("Supplied Start value is invalid"))
+            };
+            let mut end_dt: u32 = match req.match_info().get("end").unwrap_or(".").parse() {
+                Ok(val) => val,
+                Err(_) => return Ok(HttpResponse::BadRequest().body("Supplied End value is invalid"))
+            };
+
+            if end_dt == 0 {
+                end_dt = u32::MAX;
+            }
+            
+            let range: Range<u32> = Range {
+                start: start_dt,
+                end: end_dt,
+            };
+            return post_xml_due(state, user, range);
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR));
+        }
+    }
+
+    /// Endpoint for filtering all elements by matching Name and Value of subnodes with the provided Name and Value
+    #[post(r"/xml/filter/{name}/{value}")]
+    async fn post_xml_filter(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let query_name: String = req.match_info().get("name").unwrap_or("").parse().unwrap_or("".to_string());
+            let query_value: String = req.match_info().get("value").unwrap_or("").parse().unwrap_or("".to_string());
+            if query_name == "" || query_value == "" {
+                return Ok(HttpResponse::BadRequest().body("Queried Name and/or Value is/are invalid"));
+            } else {
+                let mut path: std::path::PathBuf = state.user_files_path.clone();
+                path.push(format!("{}.xml", user));
+
+                log::debug!("Got a request to filter the document");
+
+                if let Ok(mut content_part) = xml_engine::filter_subnode(&path, query_name, query_value) {
+                    if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
+                        return Ok(build_xml_response_from_string(response))
+                    }
+                }
+
+                return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
+            }
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR));
+        }
+    }
+
     /// Endpoint for getting an Element by ID
     #[post(r"/xml/get_by_id/{id}")]
     async fn post_xml_get_by_id(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
@@ -94,25 +287,18 @@ pub mod request_handler {
 
                 log::debug!("Got a request to get by id");
 
-                if let Ok(mut content_part) = xml_engine::get_node_by_id(&path, queried_id).await {
+                if let Ok(mut content_part) = xml_engine::get_node_by_id(&path, queried_id) {
                     if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
-                        let time = Utc::now().to_rfc2822().replace("+0000", "GMT");
-                        return Ok(
-                            HttpResponse::build(StatusCode::OK)
-                                .content_type(ContentType::xml())
-                                .insert_header(("content-disposition", "attachment"))
-                                .insert_header(("last-modified", time))
-                                .body(response)
-                        )
+                        return Ok(build_xml_response_from_string(response))
                     } else {
-                        return Ok(HttpResponse::InternalServerError().body("500 - Internal Server Error"))    
+                        return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))    
                     }
                 } else {
-                    return Ok(HttpResponse::InternalServerError().body("500 - Internal Server Error"))
+                    return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
                 }
             }
         } else {
-            return Ok(HttpResponse::Unauthorized().body("Provided Credentials Invalid or Missing")); 
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR)); 
         }
     }
 
@@ -159,7 +345,7 @@ pub mod request_handler {
 
             }
         } else {
-            return Ok(HttpResponse::Unauthorized().body("Provided Credentials Invalid or Missing")); 
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR)); 
         }
 
     }
@@ -180,7 +366,7 @@ pub mod request_handler {
             let mut response = HttpResponse::Ok().body("Success");
             
             log::debug!("Validating temporary file");
-            if let Ok(valid) = xml_engine::validate_xml_payload(&path).await { // Validate the xml document lying under the temporary path
+            if let Ok(valid) = xml_engine::validate_xml_payload(&path) { // Validate the xml document lying under the temporary path
                 if valid {
                     log::debug!("Submitted File valid! Copying temporary file in final place..."); 
                     fs::copy(&path, &final_path)?; //When the file is valid copy the temporary file to the final location
@@ -189,13 +375,13 @@ pub mod request_handler {
                     response = HttpResponse::BadRequest().body("Provided XML Document is invalid"); // When the file is invalid return an error
                 }
             } else {
-                response = HttpResponse::InternalServerError().body("500 - Internal Server Error");
+                response = HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR);
             };
             log::debug!("Deleting temporary file");
             fs::remove_file(&path)?; // Finally delete the temporary file
             return Ok(response)
         } else {
-            return Ok(HttpResponse::Unauthorized().body("Provided Credentials Invalid or Missing")); 
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR)); 
         }
     }
 
@@ -213,7 +399,7 @@ pub mod request_handler {
             let mut response = HttpResponse::Ok().body("Success");
             
             log::debug!("Validating temporary file");
-            if let Ok(valid) = xml_engine::validate_xml_payload(&path).await { // Validate the xml document lying under the temporary path and return according status codes
+            if let Ok(valid) = xml_engine::validate_xml_payload(&path) { // Validate the xml document lying under the temporary path and return according status codes
                 if valid {
                     log::debug!("File passed validation returning success.");
                 } else {
@@ -221,13 +407,13 @@ pub mod request_handler {
                     response = HttpResponse::BadRequest().body("Provided XML Document is invalid");
                 }
             } else {
-                response = HttpResponse::InternalServerError().body("500 - Internal Server Error");
+                response = HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR);
             };
             log::debug!("Deleting temporary file");
             fs::remove_file(&path)?; // Delete the temporary file
             return Ok(response)
         } else {
-            return Ok(HttpResponse::Unauthorized().body("Provided Credentials Invalid or Missing")); 
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR)); 
         }
     }
 
@@ -240,6 +426,13 @@ pub mod request_handler {
             App::new()
                 .app_data(web::Data::new(state.clone())) // Clone the AppState for each worker
                 .app_data(web::PayloadConfig::new(state.max_payload_size as usize).mimetype(mime::TEXT_XML)) // Only accept text/xml bodies // Maybe the Mimetype should not be restricted like that as JSON could also be accepted some day
+                .service(post_xml_priority_highest)
+                .service(post_xml_priority_custom)
+                .service(post_xml_due_tomorrow)
+                .service(post_xml_due_today)
+                .service(post_xml_due_over)
+                .service(post_xml_due_within)
+                .service(post_xml_filter)
                 .service(post_xml_get_by_id)
                 .service(post_xml_fetch)
                 .service(post_xml_update)

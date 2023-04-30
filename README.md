@@ -4,6 +4,9 @@ This is the Api server of the Freemind project.
 ## TODOs
 - Add more endpoints
 - Use user ID's instead of names as the primary key for stuff
+    - Not much needed really:
+    - The two Validate functions of the sql mod need to return the id instead of the name
+    - The database need to have the id column added (at least in the user table)
 
 ## LIMITATIONS
 ### Elements
@@ -42,19 +45,22 @@ bcrypt hash in the database
 
 ## Endpoints
 ### Existing
+- `/xml/priority/highest` To get only the nodes which have the highest priority among the document
+- `/xml/priority/{priority}` To get only nodes which priority is higher (lower numerical value) or equal to the provided priority.
+- `/xml/filter/{name}/{value}` To only get nodes which have subnodes called NAME whose value equals VALUE (not case sensitive)
 - `/xml/get_by_id/{id}` To fetch a partial XML document specifed by it's id
 - `/xml/fetch` To fetch the whole XML document.
 - `/xml/update` To update the whole XML document.
 - `/xml/validate` To validate a XML document but not actually perform any changes.
+- `/xml/due/over` To get only nodes wich were due in the past.
+- `/xml/due/today` To get only nodes wich are due or on today.
+- `/xml/due/tomorrow` To get only nodes which are due or on tomorrow.
+- `/xml/due/in/{start}/{end}` To get only nodes which due date is in between start and end
 
 ### Planned
-- `/act/delete_old` To delete nodes which are past due
-- `/act/delete_past/TIMESTAMP` To delete nodes which due is passed on TIMESTAMP
-- `/act/get_next_due` To get the next due node
-- `/act/get_next_priority` To get the next node with the highest priority.
-- `/act/get_today` To get only nodes wich are due or on today.
-- `/act/get_tomorrow` To get only nodes which are due or on tomorrow.
-- `/act/filter/NAME/VALUE` To only get nodes which have subnodes called NAME whose value equals VALUE (not case sensitive)
+- `/act/delete_past` To delete nodes which are expired
+- `/act/delete_past/TIMESTAMP` To delete nodes which are expired after TIMESTAMP
+- `/xml/get_next_due` To get the next due node
 - `/json/fetch` To fetch the whole XML document but returned as JSON.
 - `/json/sort_by/due` To get the nodes as json sorted by due
 - `/json/sort_by/priority` To get the nodes as json sorted by priority
