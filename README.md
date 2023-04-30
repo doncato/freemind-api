@@ -3,7 +3,6 @@ This is the Api server of the Freemind project.
 
 ## TODOs
 - Add more endpoints
-- Test the new endpoints
 - Use user ID's instead of names as the primary key for stuff
     - Not much needed really:
     - The two Validate functions of the sql mod need to return the id instead of the name
@@ -46,7 +45,9 @@ bcrypt hash in the database
 
 ## Endpoints
 ### Existing
-- `/xml/filter/NAME/VALUE` To only get nodes which have subnodes called NAME whose value equals VALUE (not case sensitive)
+- `/xml/priority/highest` To get only the nodes which have the highest priority among the document
+- `/xml/priority/{priority}` To get only nodes which priority is higher (lower numerical value) or equal to the provided priority.
+- `/xml/filter/{name}/{value}` To only get nodes which have subnodes called NAME whose value equals VALUE (not case sensitive)
 - `/xml/get_by_id/{id}` To fetch a partial XML document specifed by it's id
 - `/xml/fetch` To fetch the whole XML document.
 - `/xml/update` To update the whole XML document.
@@ -60,7 +61,6 @@ bcrypt hash in the database
 - `/act/delete_past` To delete nodes which are expired
 - `/act/delete_past/TIMESTAMP` To delete nodes which are expired after TIMESTAMP
 - `/xml/get_next_due` To get the next due node
-- `/xml/get_next_priority` To get the next node with the highest priority.
 - `/json/fetch` To fetch the whole XML document but returned as JSON.
 - `/json/sort_by/due` To get the nodes as json sorted by due
 - `/json/sort_by/priority` To get the nodes as json sorted by priority
