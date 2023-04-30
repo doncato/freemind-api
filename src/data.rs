@@ -320,8 +320,8 @@ pub mod xml_engine {
                     let mut fi_1 = f_1.into_iter();
                     let mut fi_2 = f_2.into_iter();
 
-                    let min_priority: u16 = match fi_2.clone().min() {
-                        Some(val) => val.parse::<u16>().unwrap_or(0), // Fixme better error handling
+                    let min_priority: u16 = match fi_2.clone().filter_map(|e| e.parse::<u16>().ok()).min() {
+                        Some(val) => val,
                         None => break // Array empty
                     };
 
@@ -337,7 +337,7 @@ pub mod xml_engine {
                             Ok(val) => val,
                             Err(_) => continue,
                         };
-                        if prio < min_priority {
+                        if prio <= min_priority {
                             final_take.push(
                                 get_partial_document(
                                     path, extend_partial_to_full_node(path, this_1)?
@@ -381,7 +381,7 @@ pub mod xml_engine {
                             Ok(val) => val,
                             Err(_) => continue,
                         };
-                        if prio < priority_thresh {
+                        if prio <= priority_thresh {
                             final_take.push(
                                 get_partial_document(
                                     path, extend_partial_to_full_node(path, this_1)?
