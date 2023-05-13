@@ -14,6 +14,7 @@ pub mod request_handler {
     use mime;
     use log;
     use std::io::ErrorKind;
+    use std::path::PathBuf;
     use futures::StreamExt;
     use std::fs;
     use tokio::io::AsyncWriteExt;
@@ -23,11 +24,19 @@ pub mod request_handler {
     const MSG_AUTH_ERROR: &str = "Provided Credentials Invalid or Missing";
     const MSG_INTERNAL_ERROR: &str = "Internal Error";
 
+
+    /// Get the path to the file of a given user
+    fn get_user_path(state: &web::Data<AppState>, user: u64) -> PathBuf {
+        let mut path: PathBuf = state.user_files_path.clone();
+        path.push(format!("{:0>10}.xml", user)); 
+        path
+    }
+
     /// Verify any Incoming Requests
     /// 
     /// Look for provided headers as authentication and check the values against
     /// the database
-    async fn verify_request<'a> (req: &'a HttpRequest, state: &web::Data<AppState>) -> Option<&'a str> {
+    async fn verify_request<'a> (req: &'a HttpRequest, state: &web::Data<AppState>) -> Option<u64> {
         log::info!(
             "New request from {:#?}",
             req.connection_info().realip_remote_addr().unwrap_or("unknown")
@@ -44,29 +53,40 @@ pub mod request_handler {
                 return None;
             }
         };
-        let token = match req.headers().get("token") { // Check for the token header
-            Some(val) => val.to_str().ok(),
-            None => None
+        let mut use_password: bool = false;
+        let mut secret = None;
+        match req.headers().get("token") { // Check for the token header
+            Some(val) => {secret = val.to_str().ok()},
+            None => ()
+        };
+        match req.headers().get("password") { // Check for the token header
+            Some(val) => {use_password = true; secret = val.to_str().ok()},
+            None => ()
         };
         let session = match req.headers().get("session") { // Check for the session header
             Some(val) => val.to_str().ok(),
             None => None
         };
 
-        if token.is_none() && session.is_none() { // Reject if neither the session nor the token header was provided
-            log::debug!("Verification failed. Neither token nor session provided.");
+        if secret.is_none() && session.is_none() { // Reject if no authentication was provided
+            log::debug!("Verification failed. Neither token, password nor session provided.");
             log::info!("Rejecting request from {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"));
             return None
-        } else if token.is_none() && session.is_some() { // Verify the data with the database using the session information when only the session was provided
+        } else if secret.is_none() && session.is_some() { // Verify the data with the database using the session information when only the session was provided
             log::debug!("Processing verification using session...");
-            if let Ok(sql_content) = mysql_handler::verify_session(&state.pool, &user.unwrap_or("."), &session.unwrap_or(".")) {
-                log::info!("Request from {:#?} accepted and authenticated as user {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"), &sql_content.unwrap_or("unknown"));
-                return sql_content;
+            log::warn!("ATTENTION: Session Authentication is currently (temporarily not supported as it may not work properly!)");
+            return None;
+            // Deactivated 
+            /*
+            if let Ok(sql_content) = mysql_handler::verify_session(&state.pool, user.unwrap().parse::<u64>().unwrap_or(0), &session.unwrap_or(".")) {
+                log::info!("Request from {:#?} accepted and authenticated as user {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"), &sql_content.unwrap_or(0));
+                return sql_content;                
             }
+            */
         } else { // Verify the data with the database using the token information when a token was provided
             log::debug!("Processing verification using token...");
-            if let Ok(sql_content) = mysql_handler::verify_user(&state.pool, &user.unwrap_or("."), &token.unwrap_or(".")) {
-                log::info!("Request from {:#?} accepted and authenticated as user {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"), &sql_content.unwrap_or("unknown"));
+            if let Ok(sql_content) = mysql_handler::verify_user(&state.pool, &user.unwrap_or("."), &secret.unwrap_or("."), use_password) {
+                log::info!("Request from {:#?} accepted and authenticated as user {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"), &sql_content.unwrap_or(0));
                 return sql_content;
             }
         }
@@ -100,9 +120,8 @@ pub mod request_handler {
     }
 
     /// Gets all elements which due falls into the between range
-    fn post_xml_due(state: web::Data<AppState>, user: &str, between: Range<u32>) -> Result<HttpResponse> {
-        let mut path: std::path::PathBuf = state.user_files_path.clone();
-        path.push(format!("{}.xml", user));
+    fn post_xml_due(state: web::Data<AppState>, user: u64, between: Range<u32>) -> Result<HttpResponse> {
+        let path = get_user_path(&state, user);
 
         if let Ok(mut content_part) = xml_engine::filter_by_due(&path, between) {
             if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
@@ -116,8 +135,7 @@ pub mod request_handler {
     #[post(r"/xml/priority/highest")]
     async fn post_xml_priority_highest(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
         if let Some(user) = verify_request(&req, &state).await {
-            let mut path: std::path::PathBuf = state.user_files_path.clone();
-            path.push(format!("{}.xml", user));
+            let path = get_user_path(&state, user);
 
             if let Ok(mut content_part) = xml_engine::get_highest_priority(&path) {
                 if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
@@ -139,8 +157,7 @@ pub mod request_handler {
                 Err(_) => return Ok(HttpResponse::BadRequest().body("Queried priority invalid"))
             };
 
-            let mut path: std::path::PathBuf = state.user_files_path.clone();
-            path.push(format!("{}.xml", user));
+            let path = get_user_path(&state, user);
 
             if let Ok(mut content_part) = xml_engine::filter_by_priority(&path, priority) {
                 if let Ok(response) = xml_engine::generate_partial(&path, &mut content_part) {
@@ -256,8 +273,7 @@ pub mod request_handler {
             if query_name == "" || query_value == "" {
                 return Ok(HttpResponse::BadRequest().body("Queried Name and/or Value is/are invalid"));
             } else {
-                let mut path: std::path::PathBuf = state.user_files_path.clone();
-                path.push(format!("{}.xml", user));
+                let path = get_user_path(&state, user);
 
                 log::debug!("Got a request to filter the document");
 
@@ -282,8 +298,7 @@ pub mod request_handler {
             if queried_id == 0 {
                 return Ok(HttpResponse::BadRequest().body("Queried ID is Invalid"))
             } else {
-                let mut path: std::path::PathBuf = state.user_files_path.clone();
-                path.push(format!("{}.xml", user));
+                let path = get_user_path(&state, user);
 
                 log::debug!("Got a request to get by id");
 
@@ -305,9 +320,8 @@ pub mod request_handler {
     /// Endpoint for fetching the whole document
     #[post(r"/xml/fetch")]
     async fn post_xml_fetch(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
-        if let Some(user) = verify_request(&req, &state).await {        // Verify the request
-            let mut path: std::path::PathBuf = state.user_files_path.clone(); // Obtain the user file directory
-            path.push(format!("{}.xml", user));                               // Create the whole path to the users document file
+        if let Some(user) = verify_request(&req, &state).await {
+            let path = get_user_path(&state, user);
 
             log::debug!("Got a fetch request.");
 
@@ -353,11 +367,10 @@ pub mod request_handler {
     /// Endpoint for uploading new documents
     #[post(r"/xml/update")]
     async fn post_xml_update(payload: web::Payload, req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
-        if let Some(user) = verify_request(&req, &state).await {         // Verify the request
-            let mut path: std::path::PathBuf = state.user_files_path.clone();  // Obtain the users file directory
-            path.push(format!("{}.tmp.xml", user));                            // Create the whole path to a temporary user file
-            let mut final_path: std::path::PathBuf = state.user_files_path.clone(); // Create another path to the final user file
-            final_path.push(format!("{}.xml", user));
+        if let Some(user) = verify_request(&req, &state).await {
+            let mut path: std::path::PathBuf = state.user_files_path.clone();
+            path.push(format!("{}.tmp.xml", user));
+            let final_path = get_user_path(&state, user);
 
             log::debug!("Got an update request, writing body into temporary file");
 
@@ -388,9 +401,8 @@ pub mod request_handler {
     /// Endpoint for just validating documents but not saving them
     #[post(r"/xml/validate")]
     async fn post_xml_validate(payload: web::Payload, req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
-        if let Some(user) = verify_request(&req, &state).await {          // Verify the request
-            let mut path: std::path::PathBuf = state.user_files_path.clone();   // Obtain users file directory
-            path.push(format!("{}.tmp.xml", user));                             // Create the whole path to a temporary user file
+        if let Some(user) = verify_request(&req, &state).await {
+            let path = get_user_path(&state, user);
 
             log::debug!("Got a verify request, writing body into temporary file.");
 
