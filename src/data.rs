@@ -774,29 +774,22 @@ pub mod mysql_handler {
     pub fn verify_user<'a>(pool: &mysql::Pool, user: &'a str, secret: &str, use_password: bool) -> Result<Option<u64>, mysql::Error> {
         let mut conn: mysql::PooledConn = pool.get_conn()?; // Obtain a pooled connection to the database
         let stmt = if use_password {
-            conn.as_mut().prep("SELECT id, password FROM logins WHERE username = ?")?
+            conn.as_mut().prep("SELECT password FROM logins WHERE username = ?")?
         } else {
-            conn.as_mut().prep("SELECT id, token FROM logins WHERE username = ?")?
+            conn.as_mut().prep("SELECT token FROM logins WHERE username = ?")?
         };
-        let res: Vec<Vec<String>> = conn.exec_map(
-            stmt, 
-            (user,),
-            |(id, secret)| {
-                vec![id, secret]
-            }
-        )?;
-        let mut user_id: Option<u64> = None;
+        let res: Option<String> = conn.exec_first(stmt, (user,))?;
+        
+        let stmt = conn.as_mut().prep("SELECT id FROM logins WHERE username = ?")?;
+        let user_id: Option<u64> = conn.exec_first(stmt, (user,))?;
+
         let mut valid: bool = false;
-        let res: Option<&Vec<String>> = res.first();
-        if res.is_some() {
-            res.unwrap(); // Shouldn't fail
-            user_id = res.unwrap()[0].parse::<u64>().ok();
-            let sec = &res.unwrap()[1];
-            valid = bcrypt::verify(secret, sec.as_ref()).unwrap_or(false); // Verify the found token from the database with the provided one using bcrypt
+        if let Some(tok) = res {
+            valid = bcrypt::verify(secret, tok.as_ref()).unwrap_or(false); // Verify the found token from the database with the provided one using bcrypt
         }
-        if valid && user_id.is_some() { // Return the result
+        if valid { // Return the result
             log::debug!("User {:#?} was successfully verified.", &user);
-            Ok(Some(user_id.unwrap()))
+            Ok(user_id)
         } else {
             log::debug!("User {:#?} tried to verify but verification failed.", &user);
             Ok(None)
