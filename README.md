@@ -3,10 +3,7 @@ This is the Api server of the Freemind project.
 
 ## TODOs
 - Add more endpoints
-- Use user ID's instead of names as the primary key for stuff
-    - Not much needed really:
-    - The two Validate functions of the sql mod need to return the id instead of the name
-    - The database need to have the id column added (at least in the user table)
+- Make Session authentication better
 
 ## LIMITATIONS
 ### Elements
