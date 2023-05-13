@@ -768,17 +768,35 @@ pub mod mysql_handler {
     use mysql;
 
     /// Verify a user using a token against the database
-    pub fn verify_user<'a>(pool: &mysql::Pool, user: &'a str, token: &str) -> Result<Option<&'a str>, mysql::Error> {
+    /// Verifies a user by their given username. Either an api token or the user
+    /// password may be supplied as secret. When authentication through password
+    /// is desired 'use_password' should be true
+    pub fn verify_user<'a>(pool: &mysql::Pool, user: &'a str, secret: &str, use_password: bool) -> Result<Option<u64>, mysql::Error> {
         let mut conn: mysql::PooledConn = pool.get_conn()?; // Obtain a pooled connection to the database
-        let stmt = conn.as_mut().prep("SELECT token FROM logins WHERE username = ?")?; // Prepare a Select statement to get the hashed token associated with the user
-        let res: Option<String> = conn.exec_first(stmt,(user,))?;
-        let mut valid = false;
-        if let Some(tok) = res {
-            valid = bcrypt::verify(token, tok.as_ref()).unwrap_or(false); // Verify the found token from the database with the provided one using bcrypt
+        let stmt = if use_password {
+            conn.as_mut().prep("SELECT id, password FROM logins WHERE username = ?")?
+        } else {
+            conn.as_mut().prep("SELECT id, token FROM logins WHERE username = ?")?
+        };
+        let res: Vec<Vec<String>> = conn.exec_map(
+            stmt, 
+            (user,),
+            |(id, secret)| {
+                vec![id, secret]
+            }
+        )?;
+        let mut user_id: Option<u64> = None;
+        let mut valid: bool = false;
+        let res: Option<&Vec<String>> = res.first();
+        if res.is_some() {
+            res.unwrap(); // Shouldn't fail
+            user_id = res.unwrap()[0].parse::<u64>().ok();
+            let sec = &res.unwrap()[1];
+            valid = bcrypt::verify(secret, sec.as_ref()).unwrap_or(false); // Verify the found token from the database with the provided one using bcrypt
         }
-        if valid { // Return the result
+        if valid && user_id.is_some() { // Return the result
             log::debug!("User {:#?} was successfully verified.", &user);
-            Ok(Some(user))
+            Ok(Some(user_id.unwrap()))
         } else {
             log::debug!("User {:#?} tried to verify but verification failed.", &user);
             Ok(None)
@@ -786,10 +804,10 @@ pub mod mysql_handler {
     }
 
     /// Verify an ongoing session against the database
-    pub fn verify_session<'a>(pool: &mysql::Pool, user: &'a str, session_id: &str) -> Result<Option<&'a str>, mysql::Error> {
+    pub fn verify_session<'a>(pool: &mysql::Pool, id: u64, session_id: &str) -> Result<Option<u64>, mysql::Error> {
         let mut conn: mysql::PooledConn = pool.get_conn()?; // Obtain a pooled connection to the database
-        let stmt = conn.as_mut().prep("SELECT expires FROM sessions WHERE username = ? AND session = ?")?; // Prepare a Select statement to get the expiration date from the session of the provided username and session
-        let expires: Option<String> = conn.exec_first(stmt, (user, session_id))?;
+        let stmt = conn.as_mut().prep("SELECT expires FROM sessions WHERE id = ? AND session = ?")?; // Prepare a Select statement to get the expiration date from the session of the provided username and session
+        let expires: Option<String> = conn.exec_first(stmt, (id, session_id))?;
         let timestamp: i64 = match DateTime::parse_from_rfc3339(expires.unwrap_or("".to_string()).as_ref()) { // Parse the expired string into a timestamp
             Ok(val) => val.timestamp(),
             Err(_) => {0},
@@ -805,10 +823,10 @@ pub mod mysql_handler {
 
         // Compare the timestamp from the database with the actual time and return the result
         if timestamp > now {
-            log::debug!("User {:#?} was successfully verified.", &user);
-            Ok(Some(user))
+            log::debug!("User {:#?} was successfully verified.", &id);
+            Ok(Some(id))
         } else {
-            log::debug!("User {:#?} tried to verify but verification failed.", &user);
+            log::debug!("User {:#?} tried to verify but verification failed.", &id);
             Ok(None)
         }
     }
@@ -867,7 +885,7 @@ pub mod mysql_handler {
         }
     
         /// A function to create a new session for desting which can either be expired already or still valid
-        fn create_test_session(pool: &mysql::Pool, user: &str, session_id: &str, expired: bool) -> Result<(), mysql::Error> {
+        fn create_test_session(pool: &mysql::Pool, user: u64, session_id: &str, expired: bool) -> Result<(), mysql::Error> {
             let now = Utc::now();
             
             let mut time = now + Days::new(1);
@@ -876,16 +894,16 @@ pub mod mysql_handler {
             }
             
             let mut conn: mysql::PooledConn = pool.get_conn()?;
-            let stmt = conn.as_mut().prep("INSERT INTO sessions (username, session, expires) VALUES (?, ?, ?)")?;
+            let stmt = conn.as_mut().prep("INSERT INTO sessions (id, session, expires) VALUES (?, ?, ?)")?;
             let _: Vec<String> = conn.exec(stmt, (user, session_id, time.to_rfc3339()))?;
     
             Ok(())
         }
 
         /// Delete all test sessions matching the user
-        fn delete_all_test_sessions(pool: &mysql::Pool, user: &str) -> Result<(), mysql::Error> {
+        fn delete_all_test_sessions(pool: &mysql::Pool, user: u64) -> Result<(), mysql::Error> {
             let mut conn: mysql::PooledConn = pool.get_conn()?;
-            let stmt = conn.as_mut().prep("DELETE FROM sessions WHERE username = ?")?;
+            let stmt = conn.as_mut().prep("DELETE FROM sessions WHERE id = ?")?;
             let _: Vec<String> = conn.exec(stmt, (user,))?;
     
             Ok(())
@@ -894,7 +912,7 @@ pub mod mysql_handler {
         /// Verifies a new session can be successfully validated
         #[test]
         fn test_session_validation() -> Result<(), mysql::Error> {
-            let user = "testuser";
+            let user = 0;
             let session_id = "0000_testsession_0000_0";
             let pool = get_sql_pool()?;
             create_test_session(&pool, user, session_id, false)?;
@@ -917,7 +935,7 @@ pub mod mysql_handler {
         /// Verifies that old sessions are being deleted
         #[test]
         fn test_delete_old_session() -> Result<(), mysql::Error> {
-            let user = "testuser";
+            let user = 0;
             let expired_session_id = "0000_testsession_0000_1";
             let valid_session_id = "0000_testsession_0000_2";
             let pool = get_sql_pool()?;
