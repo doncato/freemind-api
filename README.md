@@ -1,6 +1,8 @@
 # Freemind - API
 This is the Api server of the Freemind project.
 
+**Note: The main documentation is to be found on the wiki page of this repo**
+
 ## TODOs
 - Add more endpoints
 - Make Session authentication better
@@ -28,7 +30,7 @@ installed, create a new Database (the name is not important
 but use the name in your config file). Afterwards generate
 the important tables with the following two SQL commands:
 
-`CREATE TABLE logins (username varchar(255) NOT NULL UNIQUE, password varchar(255) NOT NULL, token varchar(255));`
+`CREATE TABLE logins (id INT UNSIGNED NOT NULL UNIQUE, username varchar(255) NOT NULL UNIQUE, password varchar(255) NOT NULL, token varchar(255));`
 
 (This one is really important when you want to have an integrated frontend
 you may not need this command but the server might fail if you don't have this
