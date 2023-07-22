@@ -17,6 +17,8 @@ log = "0.4"
 mime = "0.3"
 mysql = "23"
 quick-xml = { version = "0.27", features = ["async-tokio"] }
+sha1 = "0.10"
+md-5 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 simplelog = "0.12"
 tokio = { version = "1.25", features = ["fs", "rt", "macros"] }

@@ -13,6 +13,9 @@ pub mod request_handler {
     use chrono::prelude::*;
     use mime;
     use log;
+    use md5::{Md5};
+    use sha1::{Sha1, Digest};
+    use std::io;
     use std::io::ErrorKind;
     use std::path::PathBuf;
     use futures::StreamExt;
@@ -23,6 +26,7 @@ pub mod request_handler {
     // Constants for some return messages
     const MSG_AUTH_ERROR: &str = "Provided Credentials Invalid or Missing";
     const MSG_INTERNAL_ERROR: &str = "Internal Error";
+    const MSG_BAD_REQUEST: &str = "Provided Request Parameters are Invalid";
 
 
     /// Get the path to the file of a given user
@@ -130,6 +134,32 @@ pub mod request_handler {
         }
 
         return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
+    }
+
+    #[post(r"/checksum/{algorithm}")]
+    async fn post_checksum(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let path = get_user_path(&state, user);
+            let mut file = fs::File::open(&path)?;
+            let hash: [u8; 32] = match req.match_info().get("algorithm").unwrap_or("").to_lowercase().as_ref() {
+                "md5" => {
+                    let mut hasher = Md5::new();
+                    io::copy(&mut file, &mut hasher)?;
+                    hasher.finalize().as_slice().try_into().unwrap_or([0; 32])
+                }
+                "sha1" => {
+                    let mut hasher = Sha1::new();
+                    io::copy(&mut file, &mut hasher)?;
+                    hasher.finalize().as_slice().try_into().unwrap_or([0; 32])
+                },
+                _ => {
+                    return Ok(HttpResponse::BadRequest().body(MSG_BAD_REQUEST))
+                },
+            };
+            return Ok(HttpResponse::Ok().body(format!("{:x?}", hash)))
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR))
+        }
     }
 
     #[post(r"/xml/priority/highest")]
