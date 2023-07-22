@@ -11,7 +11,7 @@ pub mod request_handler {
     use crate::data::xml_engine;
     use core::ops::Range;
     use chrono::prelude::*;
-    use data_encoding::HEXUPPER;
+    use data_encoding::HEXLOWER;
     use mime;
     use log;
     use md5::{Md5};
@@ -147,13 +147,13 @@ pub mod request_handler {
                     let mut hasher = Md5::new();
                     io::copy(&mut file, &mut hasher)?;
                     let hash: [u8; 16] = hasher.finalize().as_slice().try_into().unwrap_or([0;16]);
-                    return Ok(HttpResponse::Ok().body(HEXUPPER.encode(&hash)))
+                    return Ok(HttpResponse::Ok().body(HEXLOWER.encode(&hash)))
                 }
                 "sha1" => {
                     let mut hasher = Sha1::new();
                     io::copy(&mut file, &mut hasher)?;
                     let hash: [u8; 20] = hasher.finalize().as_slice().try_into().unwrap_or([0;20]);
-                    return Ok(HttpResponse::Ok().body(HEXUPPER.encode(&hash)))
+                    return Ok(HttpResponse::Ok().body(HEXLOWER.encode(&hash)))
                 },
                 _ => {
                     return Ok(HttpResponse::BadRequest().body(MSG_BAD_REQUEST))
