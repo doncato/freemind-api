@@ -468,6 +468,7 @@ pub mod request_handler {
             App::new()
                 .app_data(web::Data::new(state.clone())) // Clone the AppState for each worker
                 .app_data(web::PayloadConfig::new(state.max_payload_size as usize).mimetype(mime::TEXT_XML)) // Only accept text/xml bodies // Maybe the Mimetype should not be restricted like that as JSON could also be accepted some day
+                .service(post_checksum)
                 .service(post_xml_priority_highest)
                 .service(post_xml_priority_custom)
                 .service(post_xml_due_tomorrow)
