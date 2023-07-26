@@ -42,6 +42,7 @@ bcrypt hash in the database
 
 ## Endpoints
 ### Existing
+- `/checksum/{algorithm}` To get the calculated checksum of the current document calculated using the provided algorithm (sha1, md5 currently supported)
 - `/xml/priority/highest` To get only the nodes which have the highest priority among the document
 - `/xml/priority/{priority}` To get only nodes which priority is higher (lower numerical value) or equal to the provided priority.
 - `/xml/filter/{name}/{value}` To only get nodes which have subnodes called NAME whose value equals VALUE (not case sensitive)
