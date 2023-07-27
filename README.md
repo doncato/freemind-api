@@ -27,24 +27,36 @@ Assuming you already MariaDB (or something comparable)
 installed, create a new Database (the name is not important
 but use the name in your config file): 
 
-```CREATE DATABASE freemind;```
-```USE freemind;```
+```sql
+CREATE DATABASE freemind;
+```
+```sql
+USE freemind;
+```
 
 Afterwards generate
 the important tables with the following two SQL commands:
 
-```CREATE TABLE logins (username varchar(255) NOT NULL UNIQUE, password varchar(255) NOT NULL, token varchar(255) NOT NULL UNIQUE, id int, PRIMARY KEY (id));```
+```sql
+CREATE TABLE logins (username varchar(255) NOT NULL UNIQUE, password varchar(255) NOT NULL, token varchar(255) NOT NULL UNIQUE, id int, PRIMARY KEY (id));
+```
 
 (This one is really important when you want to have an integrated frontend for
 tracking and comparing valid sessions you may not need this command but the
 server might fail if you don't have this table in place. Additionally it
 may be used more in upcomming releases (currently it is only used by the webapp))
-```CREATE TABLE sessions (session varchar(255), expires varchar(255) NOT NULL, id int NOT NULL, PRIMARY KEY(session));```
+```sql
+    CREATE TABLE sessions (session varchar(255), expires varchar(255) NOT NULL, id int NOT NULL, PRIMARY KEY(session));
+```
 
 Furthermore a User is needed that has access to the newly created databases.
 This can be donce like so (choose something different as username and password please):
-```CREATE USER 'freeadmin'@'localhost' IDENTIFIED BY 'admind';```
-```GRANT ALL PRIVILEGES ON freemind.* TO 'freeadmin'@'localhost';```
+```sql
+CREATE USER 'freeadmin'@'localhost' IDENTIFIED BY 'admind';
+```
+```sql
+GRANT ALL PRIVILEGES ON freemind.* TO 'freeadmin'@'localhost';
+```
 
 ### 3. Run
 Start the binary. You can now insert new users into your database (or do so via the web frontend when also installed).
