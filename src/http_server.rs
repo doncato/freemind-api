@@ -11,8 +11,12 @@ pub mod request_handler {
     use crate::data::xml_engine;
     use core::ops::Range;
     use chrono::prelude::*;
+    use data_encoding::HEXLOWER;
     use mime;
     use log;
+    use md5::{Md5};
+    use sha1::{Sha1, Digest};
+    use std::{io, fs::File};
     use std::io::ErrorKind;
     use std::path::PathBuf;
     use futures::StreamExt;
@@ -23,6 +27,7 @@ pub mod request_handler {
     // Constants for some return messages
     const MSG_AUTH_ERROR: &str = "Provided Credentials Invalid or Missing";
     const MSG_INTERNAL_ERROR: &str = "Internal Error";
+    const MSG_BAD_REQUEST: &str = "Provided Request Parameters are Invalid";
 
 
     /// Get the path to the file of a given user
@@ -130,6 +135,33 @@ pub mod request_handler {
         }
 
         return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
+    }
+
+    #[post(r"/checksum/{algorithm}")]
+    async fn post_checksum(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            let path = get_user_path(&state, user);
+            let mut file: File = fs::File::open(&path)?;
+            match req.match_info().get("algorithm").unwrap_or("").to_lowercase().as_ref() {
+                "md5" => {
+                    let mut hasher = Md5::new();
+                    io::copy(&mut file, &mut hasher)?;
+                    let hash: [u8; 16] = hasher.finalize().as_slice().try_into().unwrap_or([0;16]);
+                    return Ok(HttpResponse::Ok().body(HEXLOWER.encode(&hash)))
+                }
+                "sha1" => {
+                    let mut hasher = Sha1::new();
+                    io::copy(&mut file, &mut hasher)?;
+                    let hash: [u8; 20] = hasher.finalize().as_slice().try_into().unwrap_or([0;20]);
+                    return Ok(HttpResponse::Ok().body(HEXLOWER.encode(&hash)))
+                },
+                _ => {
+                    return Ok(HttpResponse::BadRequest().body(MSG_BAD_REQUEST))
+                },
+            };
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR))
+        }
     }
 
     #[post(r"/xml/priority/highest")]
@@ -438,6 +470,7 @@ pub mod request_handler {
             App::new()
                 .app_data(web::Data::new(state.clone())) // Clone the AppState for each worker
                 .app_data(web::PayloadConfig::new(state.max_payload_size as usize).mimetype(mime::TEXT_XML)) // Only accept text/xml bodies // Maybe the Mimetype should not be restricted like that as JSON could also be accepted some day
+                .service(post_checksum)
                 .service(post_xml_priority_highest)
                 .service(post_xml_priority_custom)
                 .service(post_xml_due_tomorrow)
