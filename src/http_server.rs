@@ -385,7 +385,7 @@ pub mod request_handler {
                             .content_type(ContentType::xml())
                             .insert_header(("content-disposition", "attachment"))
                             .insert_header(("last-modified", time))
-                            .body("<?xml version=\"1.0\" encoding=\"UTF-8\"?><registry version=\"1.0\"></registry>")
+                            .body("<?xml version=\"1.0\" encoding=\"UTF-8\"?><root><registry version=\"1.0\"></registry></root>")
                     )
                 }
 

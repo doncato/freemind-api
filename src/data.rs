@@ -279,7 +279,7 @@ pub mod xml_engine {
     /// uses the path to generate meta section automatically and fills in the
     /// content at the partial node
     pub fn generate_partial(path: &PathBuf, content: &mut Vec<Take<File>>) -> Result<String, quick_xml::Error> {
-        let mut result = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><meta><existing_ids><id>".to_string();
+        let mut result = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><root><meta><existing_ids><id>".to_string();
         let ids = collect_all_ids(path)?
             .into_iter()
             .map(|e| e.to_string())
@@ -300,7 +300,7 @@ pub mod xml_engine {
                 Err(_) => {return}
             };
         });
-        result.push_str("</part>");
+        result.push_str("</part></root>");
 
         return Ok(result)
     }
@@ -515,13 +515,20 @@ pub mod xml_engine {
 
     /// Validates any xml document located under *path*
     pub fn validate_xml_payload(path: &PathBuf) -> Result<bool, quick_xml::Error> {
+        let mut root_found: bool = false;
         let mut registry_count: u8 = 0;
-
         let mut xml_reader = XmlReader::from_file(path)?;
         let mut buf: Vec<u8> = Vec::new();
         let mut ids: Vec<u16> = Vec::new();
         loop {
             match xml_reader.read_event_into(&mut buf)? {
+                XmlEvent::Start(e) if e.name().as_ref() == b"root" => {
+                    if !root_found {
+                        root_found = true;
+                    } else {
+                        return Ok(false)
+                    }
+                }
                 XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
                     // Traverse through the registry
                     registry_count += 1;
@@ -546,7 +553,7 @@ pub mod xml_engine {
                 _ => (),
             }
         }
-        Ok(registry_count == 1) // There should be only one registry so yeah guess the rest
+        Ok(registry_count == 1 && root_found) // There should be only one registry so yeah guess the rest
     }
 
     #[cfg(test)]
