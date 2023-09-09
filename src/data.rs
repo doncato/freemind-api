@@ -279,14 +279,14 @@ pub mod xml_engine {
     /// uses the path to generate meta section automatically and fills in the
     /// content at the partial node
     pub fn generate_partial(path: &PathBuf, content: &mut Vec<Take<File>>) -> Result<String, quick_xml::Error> {
-        let mut result = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><meta><existing_ids><id>".to_string();
+        let mut result = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><part><meta><existing_ids><id>".to_string();
         let ids = collect_all_ids(path)?
             .into_iter()
             .map(|e| e.to_string())
             .collect::<Vec<String>>()
             .join("</id><id>");
         result.push_str(&ids);
-        result.push_str("</id></existing_ids></meta><part>");
+        result.push_str("</id></existing_ids></meta><data>");
         content.iter_mut().for_each(|cont: &mut Take<File>| {
             let mut part: String = "".to_string();
             // My plan here was to just pass the error through, as always, but
@@ -300,7 +300,7 @@ pub mod xml_engine {
                 Err(_) => {return}
             };
         });
-        result.push_str("</part>");
+        result.push_str("</data></part>");
 
         return Ok(result)
     }
@@ -515,30 +515,32 @@ pub mod xml_engine {
 
     /// Validates any xml document located under *path*
     pub fn validate_xml_payload(path: &PathBuf) -> Result<bool, quick_xml::Error> {
-        let mut registry_count: u8 = 0;
-
+        let mut registry_found: bool = false;
         let mut xml_reader = XmlReader::from_file(path)?;
         let mut buf: Vec<u8> = Vec::new();
         let mut ids: Vec<u16> = Vec::new();
         loop {
             match xml_reader.read_event_into(&mut buf)? {
                 XmlEvent::Start(e) if e.name().as_ref() == b"registry" => {
-                    // Traverse through the registry
-                    registry_count += 1;
-                    if let Some(res) = read_registry_nodes_for_ids(&mut xml_reader)? {
-                        ids.extend(res);
+                    if registry_found {
+                        return Ok(false);
                     } else {
-                        return Ok(false)
-                    }
-                    let length_then = ids.len();
-                    ids.sort_unstable(); // unstable is faster and lighter on memory says the documentation
-                    ids.dedup();
-                    let lenght_now = ids.len();
-                    if lenght_now != length_then { // Meaning there were duplicates removed
-                        return Ok(false) // Duplicates are not allowed
+                        registry_found = true;
+                        if let Some(res) = read_registry_nodes_for_ids(&mut xml_reader)? {
+                            ids.extend(res);
+                        } else {
+                            return Ok(false)
+                        }
+                        let length_then = ids.len();
+                        ids.sort_unstable(); // unstable is faster and lighter on memory says the documentation
+                        ids.dedup();
+                        let lenght_now = ids.len();
+                        if lenght_now != length_then { // Meaning there were duplicates removed
+                            return Ok(false) // Duplicates are not allowed
+                        }
                     }
                 },
-                XmlEvent::Start(e) if e.name().as_ref() == b"meta" => {
+                XmlEvent::Start(e) if e.name().as_ref() == b"part" => {
                     // Traverse through the meta
                 },
                 XmlEvent::Start(_e) => {},
@@ -546,7 +548,7 @@ pub mod xml_engine {
                 _ => (),
             }
         }
-        Ok(registry_count == 1) // There should be only one registry so yeah guess the rest
+        Ok(registry_found) // There should be only one registry so yeah guess the rest
     }
 
     #[cfg(test)]
