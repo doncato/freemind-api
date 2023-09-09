@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<root>
 <registry version="1.0">
     <entry id="12845">
         <type>ToDo</type>
@@ -40,4 +39,3 @@
         </directory>
     </directory>
 </registry>
-</root>
