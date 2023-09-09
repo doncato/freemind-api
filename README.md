@@ -1,6 +1,8 @@
 # Freemind - API
 This is the Api server of the Freemind project.
 
+**Note: The main documentation is to be found on the wiki page of this repo**
+
 ## TODOs
 - Add more endpoints
 - Make Session authentication better
@@ -46,7 +48,7 @@ tracking and comparing valid sessions you may not need this command but the
 server might fail if you don't have this table in place. Additionally it
 may be used more in upcomming releases (currently it is only used by the webapp))
 ```sql
-    CREATE TABLE sessions (session varchar(255), expires varchar(255) NOT NULL, id int NOT NULL, PRIMARY KEY(session));
+CREATE TABLE sessions (session varchar(255), expires varchar(255) NOT NULL, id int NOT NULL, PRIMARY KEY(session));
 ```
 
 Furthermore a User is needed that has access to the newly created databases.
