@@ -813,7 +813,6 @@ pub mod mysql_handler {
 
         // Delete expired sessions every now and then
         if (now % 5) == 0 {
-            println!("Random delete");
             log::debug!("Starting to delete expired sessions");
             delete_expired_sessions(pool)?; // This is not really expected to fail as it should just execute SQL statements which was already done before
             log::debug!("Finished to delete expired sessions");
