@@ -11,6 +11,9 @@ mod data;
 pub use crate::data::mysql_handler;
 pub use crate::data::data_types;
 
+mod utils;
+pub use crate::utils::util;
+
 
 
 /// Initialize the logger

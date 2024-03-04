@@ -768,21 +768,23 @@ pub mod mysql_handler {
     use chrono::{DateTime, offset::Utc};
     use mysql::prelude::Queryable;
     use mysql;
+    use crate::utils::util;
 
     /// Verify a user using a token against the database
     /// Verifies a user by their given username. Either an api token or the user
     /// password may be supplied as secret. When authentication through password
     /// is desired 'use_password' should be true
+    /// Returns the user id if authentication was successful or none otherwise.
     pub fn verify_user<'a>(pool: &mysql::Pool, user: &'a str, secret: &str, use_password: bool) -> Result<Option<u64>, mysql::Error> {
         let mut conn: mysql::PooledConn = pool.get_conn()?; // Obtain a pooled connection to the database
-        let stmt = if use_password {
+        let stmt: mysql::Statement = if use_password {
             conn.as_mut().prep("SELECT password FROM logins WHERE username = ?")?
         } else {
             conn.as_mut().prep("SELECT token FROM logins WHERE username = ?")?
         };
         let res: Option<String> = conn.exec_first(stmt, (user,))?;
         
-        let stmt = conn.as_mut().prep("SELECT id FROM logins WHERE username = ?")?;
+        let stmt: mysql::Statement = conn.as_mut().prep("SELECT id FROM logins WHERE username = ?")?;
         let user_id: Option<u64> = conn.exec_first(stmt, (user,))?;
 
         let mut valid: bool = false;
@@ -801,7 +803,7 @@ pub mod mysql_handler {
     /// Verify an ongoing session against the database
     pub fn verify_session<'a>(pool: &mysql::Pool, id: u64, session_id: &str) -> Result<Option<u64>, mysql::Error> {
         let mut conn: mysql::PooledConn = pool.get_conn()?; // Obtain a pooled connection to the database
-        let stmt = conn.as_mut().prep("SELECT expires FROM sessions WHERE id = ? AND session = ?")?; // Prepare a Select statement to get the expiration date from the session of the provided username and session
+        let stmt: mysql::Statement = conn.as_mut().prep("SELECT expires FROM sessions WHERE id = ? AND session = ?")?; // Prepare a Select statement to get the expiration date from the session of the provided username and session
         let expires: Option<String> = conn.exec_first(stmt, (id, session_id))?;
         let timestamp: i64 = match DateTime::parse_from_rfc3339(expires.unwrap_or("".to_string()).as_ref()) { // Parse the expired string into a timestamp
             Ok(val) => val.timestamp(),
@@ -826,6 +828,67 @@ pub mod mysql_handler {
         }
     }
 
+    /// Starts a new session for the specified user with the initial expiry in
+    /// 'seconds' seconds in the future. Returns the generated session id on success
+    /// or none if the given user id is invalid.
+    pub fn start_session<'a>(pool: &mysql::Pool, id: u64, seconds: u32) -> Result<Option<String>, mysql::Error> {
+        let mut conn: mysql::PooledConn = pool.get_conn()?;
+        let stmt: mysql::Statement = conn.as_mut().prep("SELECT id FROM logins WHERE username = ?")?;
+        if let Some(user_id) = conn.exec_first::<u64, mysql::Statement, (u64,)>(stmt, (id,))? {
+            let now: i64 = Utc::now().timestamp();
+            let then: i64 = now + seconds as i64;
+            let then_formatted: String = match DateTime::from_timestamp(then, 0) {
+                Some(val) => val.to_rfc3339(),
+                None => DateTime::from_timestamp(now, 0).unwrap().to_rfc3339(),
+            };
+
+            let session: String = util::get_random_string(18);
+
+            let stmt: mysql::Statement = conn.as_mut().prep("INSERT INTO sessions (id, session, expires) VALUES (?, ?, ?)")?;
+            let result: Option<String> = conn.exec_first(stmt, (user_id, &session, then_formatted))?;
+            log::info!("{:?}", result);
+            Ok(Some(session))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// "Extends" an ongoing session in the database by the provided amount of seconds
+    /// This will only set the 'expires' timestamp to the amount of seconds in the future
+    /// This will not alter the 'expires' timestamp if the session lives already longer
+    /// than the provided seconds or if the session is expired.
+    /// Will return the new EPOCH Timestamp that was set in the database or none if it wasn't modified
+    pub fn extend_session<'a>(pool: &mysql::Pool, id: u64, session_id: &str, seconds: u32) -> Result<Option<i64>, mysql::Error> {
+        let mut conn: mysql::PooledConn = pool.get_conn()?; // Obtain a pooled connection to the database
+        let stmt: mysql::Statement = conn.as_mut().prep("SELECT expires FROM sessions WHERE id = ? AND session = ?")?;
+        let expires: Option<String> = conn.exec_first(stmt, (id, session_id))?;
+        let timestamp: i64 = match DateTime::parse_from_rfc3339(expires.as_ref().unwrap_or(&"".to_string()).as_ref()) {
+            Ok(val) => val.timestamp(),
+            Err(_) => {0},
+        };
+        let now: i64 = Utc::now().timestamp();
+        let then: i64 = now + seconds as i64;
+
+        // Delete expired sessions every now and then
+        if (now % 5) == 0 {
+            log::debug!("Starting to delete expired sessions");
+            delete_expired_sessions(pool)?; // This is not really expected to fail as it should just execute SQL statements which was already done before
+            log::debug!("Finished to delete expired sessions");
+        }
+        
+        if timestamp > now && timestamp < then {
+            let then_formatted: String = match DateTime::from_timestamp(then, 0) {
+                Some(val) => val.to_rfc3339(),
+                None => expires.unwrap_or("".to_string())
+            };
+            let stmt: mysql::Statement = conn.as_mut().prep("UPDATE sessions SET expires = ? WHERE id = ? AND session = ?")?;
+            conn.exec_first::<Option<String>, mysql::Statement, (String, u64, &str)>(stmt, (then_formatted, id, session_id))?;
+            Ok(Some(then))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Deletes all sessions from the database which have expired
     fn delete_expired_sessions(pool: &mysql::Pool) -> Result<(), mysql::Error> {
         log::debug!("Fetching all sessions from the databse");
@@ -840,8 +903,8 @@ pub mod mysql_handler {
         let now: i64 = Utc::now().timestamp();
 
         for row in all_sessions.iter() {
-            let session = &row[0];
-            let expires = &row[1];
+            let session: &String = &row[0];
+            let expires: &String = &row[1];
 
             let timestamp: i64 = match DateTime::parse_from_rfc3339(expires) {
                 Ok(val) => val.timestamp(),
@@ -867,7 +930,7 @@ pub mod mysql_handler {
         use mysql;
         use test_log::test;
 
-        // Function to get an SQL connection directly from config file
+        /// Function to get an SQL connection directly from config file
         fn get_sql_pool() -> Result<mysql::Pool, mysql::Error> {
             let config: AppConfig = confy::load_path("./freemind.config").unwrap_or_default();
             let opts = mysql::OptsBuilder::new()
@@ -881,15 +944,15 @@ pub mod mysql_handler {
     
         /// A function to create a new session for desting which can either be expired already or still valid
         fn create_test_session(pool: &mysql::Pool, user: u64, session_id: &str, expired: bool) -> Result<(), mysql::Error> {
-            let now = Utc::now();
+            let now: chrono::DateTime<Utc> = Utc::now();
             
             let mut time = now + Days::new(1);
             if expired {
-                time = now - Days::new(1);
+                time = now - Days::new(2);
             }
             
             let mut conn: mysql::PooledConn = pool.get_conn()?;
-            let stmt = conn.as_mut().prep("INSERT INTO sessions (id, session, expires) VALUES (?, ?, ?)")?;
+            let stmt: mysql::Statement = conn.as_mut().prep("INSERT INTO sessions (id, session, expires) VALUES (?, ?, ?)")?;
             let _: Vec<String> = conn.exec(stmt, (user, session_id, time.to_rfc3339()))?;
     
             Ok(())
@@ -898,7 +961,7 @@ pub mod mysql_handler {
         /// Delete all test sessions matching the user
         fn delete_all_test_sessions(pool: &mysql::Pool, user: u64) -> Result<(), mysql::Error> {
             let mut conn: mysql::PooledConn = pool.get_conn()?;
-            let stmt = conn.as_mut().prep("DELETE FROM sessions WHERE id = ?")?;
+            let stmt: mysql::Statement = conn.as_mut().prep("DELETE FROM sessions WHERE id = ?")?;
             let _: Vec<String> = conn.exec(stmt, (user,))?;
     
             Ok(())
@@ -907,7 +970,7 @@ pub mod mysql_handler {
         /// Verifies a new session can be successfully validated
         #[test]
         fn test_session_validation() -> Result<(), mysql::Error> {
-            let user = 0;
+            let user = 5;
             let session_id = "0000_testsession_0000_0";
             let pool = get_sql_pool()?;
             create_test_session(&pool, user, session_id, false)?;
@@ -930,14 +993,14 @@ pub mod mysql_handler {
         /// Verifies that old sessions are being deleted
         #[test]
         fn test_delete_old_session() -> Result<(), mysql::Error> {
-            let user = 0;
+            let user = 10;
             let expired_session_id = "0000_testsession_0000_1";
             let valid_session_id = "0000_testsession_0000_2";
             let pool = get_sql_pool()?;
 
             create_test_session(&pool, user, expired_session_id, true)?;
             create_test_session(&pool, user, valid_session_id, false)?;
-    
+
             mysql_handler::delete_expired_sessions(&pool)?;
 
             let res_1 = mysql_handler::verify_session(&pool, user, expired_session_id)?;
