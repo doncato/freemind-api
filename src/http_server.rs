@@ -28,6 +28,7 @@ pub mod request_handler {
     const MSG_AUTH_ERROR: &str = "Provided Credentials Invalid or Missing";
     const MSG_INTERNAL_ERROR: &str = "Internal Error";
     const MSG_BAD_REQUEST: &str = "Provided Request Parameters are Invalid";
+    const DEFAULT_SESSION_TIME: u32 = 300;
 
 
     /// Get the path to the file of a given user
@@ -78,16 +79,10 @@ pub mod request_handler {
             log::info!("Rejecting request from {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"));
             return None
         } else if secret.is_none() && session.is_some() { // Verify the data with the database using the session information when only the session was provided
-            log::debug!("Processing verification using session...");
-            log::warn!("ATTENTION: Session Authentication is currently (temporarily not supported as it may not work properly!)");
-            return None;
-            // Deactivated 
-            /*
             if let Ok(sql_content) = mysql_handler::verify_session(&state.pool, user.unwrap().parse::<u64>().unwrap_or(0), &session.unwrap_or(".")) {
                 log::info!("Request from {:#?} accepted and authenticated as user {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"), &sql_content.unwrap_or(0));
                 return sql_content;                
             }
-            */
         } else { // Verify the data with the database using the token information when a token was provided
             log::debug!("Processing verification using token...");
             if let Ok(sql_content) = mysql_handler::verify_user(&state.pool, &user.unwrap_or("."), &secret.unwrap_or("."), use_password) {
@@ -159,6 +154,36 @@ pub mod request_handler {
                     return Ok(HttpResponse::BadRequest().body(MSG_BAD_REQUEST))
                 },
             };
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR))
+        }
+    }
+
+    #[post(r"/session/auth")]
+    async fn post_session_auth(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            if let Ok(Some(session)) = mysql_handler::start_session(&state.pool, user, DEFAULT_SESSION_TIME) {
+                return Ok(HttpResponse::Ok().body(session))
+            } else {
+                return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
+            }
+        } else {
+            return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR))
+        }
+    }
+
+    #[post(r"/session/extend")]
+    async fn post_session_extend(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
+        if let Some(user) = verify_request(&req, &state).await {
+            if let Some(session) = req.headers().get("session") { // Check for the session header
+                if let Ok(Some(_)) = mysql_handler::extend_session(&state.pool, user, session.to_str().ok().unwrap_or(""), DEFAULT_SESSION_TIME) {
+                    return Ok(HttpResponse::Ok().body(()))
+                } else {
+                    return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))
+                }
+            } else {
+                return Ok(HttpResponse::BadRequest().body(MSG_BAD_REQUEST))
+            }
         } else {
             return Ok(HttpResponse::Unauthorized().body(MSG_AUTH_ERROR))
         }
@@ -471,6 +496,8 @@ pub mod request_handler {
                 .app_data(web::Data::new(state.clone())) // Clone the AppState for each worker
                 .app_data(web::PayloadConfig::new(state.max_payload_size as usize).mimetype(mime::TEXT_XML)) // Only accept text/xml bodies // Maybe the Mimetype should not be restricted like that as JSON could also be accepted some day
                 .service(post_checksum)
+                .service(post_session_auth)
+                .service(post_session_extend)
                 .service(post_xml_priority_highest)
                 .service(post_xml_priority_custom)
                 .service(post_xml_due_tomorrow)
