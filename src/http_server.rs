@@ -79,7 +79,7 @@ pub mod request_handler {
             log::info!("Rejecting request from {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"));
             return None
         } else if secret.is_none() && session.is_some() { // Verify the data with the database using the session information when only the session was provided
-            if let Ok(sql_content) = mysql_handler::verify_session(&state.pool, user.unwrap().parse::<u64>().unwrap_or(0), &session.unwrap_or(".")) {
+            if let Ok(sql_content) = mysql_handler::verify_session(&state.pool, &user.unwrap_or("."), &session.unwrap_or(".")) {
                 log::info!("Request from {:#?} accepted and authenticated as user {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"), &sql_content.unwrap_or(0));
                 // Extending session as user made an authenticated request
                 if let Some(user) = sql_content {

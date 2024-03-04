@@ -801,29 +801,36 @@ pub mod mysql_handler {
     }
 
     /// Verify an ongoing session against the database
-    pub fn verify_session<'a>(pool: &mysql::Pool, id: u64, session_id: &str) -> Result<Option<u64>, mysql::Error> {
+    /// Verifies a user by their given username
+    /// Returns the user id if authentication was successful or none otherwise
+    pub fn verify_session<'a>(pool: &mysql::Pool, user: &'a str, session_id: &str) -> Result<Option<u64>, mysql::Error> {
         let mut conn: mysql::PooledConn = pool.get_conn()?; // Obtain a pooled connection to the database
-        let stmt: mysql::Statement = conn.as_mut().prep("SELECT expires FROM sessions WHERE id = ? AND session = ?")?; // Prepare a Select statement to get the expiration date from the session of the provided username and session
-        let expires: Option<String> = conn.exec_first(stmt, (id, session_id))?;
-        let timestamp: i64 = match DateTime::parse_from_rfc3339(expires.unwrap_or("".to_string()).as_ref()) { // Parse the expired string into a timestamp
-            Ok(val) => val.timestamp(),
-            Err(_) => {0},
-        };
-        let now: i64 = Utc::now().timestamp();
-
-        // Delete expired sessions every now and then
-        if (now % 5) == 0 {
-            log::debug!("Starting to delete expired sessions");
-            delete_expired_sessions(pool)?; // This is not really expected to fail as it should just execute SQL statements which was already done before
-            log::debug!("Finished to delete expired sessions");
-        }
-
-        // Compare the timestamp from the database with the actual time and return the result
-        if timestamp > now {
-            log::debug!("User {:#?} was successfully verified.", &id);
-            Ok(Some(id))
+        let stmt: mysql::Statement = conn.as_mut().prep(
+            "SELECT sessions.id,expires FROM sessions INNER JOIN logins ON logins.id=sessions.id WHERE logins.username = ? AND sessions.session = ?"
+        )?; // Prepare a Select statement to get the expiration date from the session of the provided username and session
+        if let Some((id, expires)) = conn.exec_first::<(u64, String), mysql::Statement, (&str, &str)>(stmt, (user, session_id))? {
+            let timestamp: i64 = match DateTime::parse_from_rfc3339(expires.as_ref()) { // Parse the expired string into a timestamp
+                Ok(val) => val.timestamp(),
+                Err(_) => {0},
+            };
+            let now: i64 = Utc::now().timestamp();
+    
+            // Delete expired sessions every now and then
+            if (now % 5) == 0 {
+                log::debug!("Starting to delete expired sessions");
+                delete_expired_sessions(pool)?; // This is not really expected to fail as it should just execute SQL statements which was already done before
+                log::debug!("Finished to delete expired sessions");
+            }
+    
+            // Compare the timestamp from the database with the actual time and return the result
+            if timestamp > now {
+                log::debug!("User {:#?} was successfully verified.", &id);
+                Ok(Some(id))
+            } else {
+                log::debug!("User {:#?} tried to verify but verification failed.", &id);
+                Ok(None)
+            }
         } else {
-            log::debug!("User {:#?} tried to verify but verification failed.", &id);
             Ok(None)
         }
     }
@@ -833,7 +840,7 @@ pub mod mysql_handler {
     /// or none if the given user id is invalid.
     pub fn start_session<'a>(pool: &mysql::Pool, id: u64, seconds: u32) -> Result<Option<String>, mysql::Error> {
         let mut conn: mysql::PooledConn = pool.get_conn()?;
-        let stmt: mysql::Statement = conn.as_mut().prep("SELECT id FROM logins WHERE username = ?")?;
+        let stmt: mysql::Statement = conn.as_mut().prep("SELECT id FROM logins WHERE id = ?")?;
         if let Some(user_id) = conn.exec_first::<u64, mysql::Statement, (u64,)>(stmt, (id,))? {
             let now: i64 = Utc::now().timestamp();
             let then: i64 = now + seconds as i64;
@@ -970,18 +977,18 @@ pub mod mysql_handler {
         /// Verifies a new session can be successfully validated
         #[test]
         fn test_session_validation() -> Result<(), mysql::Error> {
-            let user = 5;
+            let user = 0;
             let session_id = "0000_testsession_0000_0";
             let pool = get_sql_pool()?;
             create_test_session(&pool, user, session_id, false)?;
 
-            let res = mysql_handler::verify_session(&pool, user, session_id)?;
+            let res = mysql_handler::verify_session(&pool, "doncato", session_id)?;
 
             assert_eq!(Some(user), res);
 
             delete_all_test_sessions(&pool, user)?;
 
-            let res = mysql_handler::verify_session(&pool, user, session_id)?;
+            let res = mysql_handler::verify_session(&pool, "doncato", session_id)?;
 
             assert_eq!(None, res); // Session should now be invalid
 
@@ -993,7 +1000,7 @@ pub mod mysql_handler {
         /// Verifies that old sessions are being deleted
         #[test]
         fn test_delete_old_session() -> Result<(), mysql::Error> {
-            let user = 10;
+            let user = 0;
             let expired_session_id = "0000_testsession_0000_1";
             let valid_session_id = "0000_testsession_0000_2";
             let pool = get_sql_pool()?;
@@ -1003,8 +1010,8 @@ pub mod mysql_handler {
 
             mysql_handler::delete_expired_sessions(&pool)?;
 
-            let res_1 = mysql_handler::verify_session(&pool, user, expired_session_id)?;
-            let res_2 = mysql_handler::verify_session(&pool, user, valid_session_id)?;
+            let res_1 = mysql_handler::verify_session(&pool, "doncato", expired_session_id)?;
+            let res_2 = mysql_handler::verify_session(&pool, "doncato", valid_session_id)?;
 
             assert_eq!(None, res_1);
             assert_eq!(Some(user), res_2);
