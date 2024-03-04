@@ -81,7 +81,14 @@ pub mod request_handler {
         } else if secret.is_none() && session.is_some() { // Verify the data with the database using the session information when only the session was provided
             if let Ok(sql_content) = mysql_handler::verify_session(&state.pool, user.unwrap().parse::<u64>().unwrap_or(0), &session.unwrap_or(".")) {
                 log::info!("Request from {:#?} accepted and authenticated as user {:#?}", req.connection_info().realip_remote_addr().unwrap_or("unknown"), &sql_content.unwrap_or(0));
-                return sql_content;                
+                // Extending session as user made an authenticated request
+                if let Some(user) = sql_content {
+                    match mysql_handler::extend_session(&state.pool, user, session.unwrap_or("."), DEFAULT_SESSION_TIME) {
+                        Ok(_) => (),
+                        Err(err) => log::error!("Error extending session: {}", err),
+                    };
+                }
+                return sql_content;
             }
         } else { // Verify the data with the database using the token information when a token was provided
             log::debug!("Processing verification using token...");
@@ -176,7 +183,7 @@ pub mod request_handler {
     async fn post_session_extend(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse> {
         if let Some(user) = verify_request(&req, &state).await {
             if let Some(session) = req.headers().get("session") { // Check for the session header
-                if let Ok(Some(_)) = mysql_handler::extend_session(&state.pool, user, session.to_str().ok().unwrap_or(""), DEFAULT_SESSION_TIME) {
+                if let Ok(Some(_)) = mysql_handler::extend_session(&state.pool, user, session.to_str().ok().unwrap_or(""), 2*DEFAULT_SESSION_TIME) {
                     return Ok(HttpResponse::Ok().body(()))
                 } else {
                     return Ok(HttpResponse::InternalServerError().body(MSG_INTERNAL_ERROR))

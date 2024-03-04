@@ -882,8 +882,7 @@ pub mod mysql_handler {
                 None => expires.unwrap_or("".to_string())
             };
             let stmt: mysql::Statement = conn.as_mut().prep("UPDATE sessions SET expires = ? WHERE id = ? AND session = ?")?;
-            let res: Option<String> = conn.exec_first(stmt, (then_formatted, id, session_id))?;
-            log::info!("{:?}", res);
+            conn.exec_first::<Option<String>, mysql::Statement, (String, u64, &str)>(stmt, (then_formatted, id, session_id))?;
             Ok(Some(then))
         } else {
             Ok(None)
